@@ -1,6 +1,7 @@
 package com.gtnewhorizons.angelica.lwjgl3;
 
 import com.gtnewhorizons.angelica.glsm.backend.DebugMessageHandler;
+import com.gtnewhorizons.angelica.glsm.backend.GlfwFileDropWatcher;
 import com.gtnewhorizons.angelica.glsm.backend.RenderBackend;
 import org.lwjgl.opengl.ARBClearTexture;
 import org.lwjgl.opengl.EXTDirectStateAccess;
@@ -30,6 +31,7 @@ import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.ShortBuffer;
+import java.util.List;
 
 /**
  * LWJGL3 GL implementation of {@link RenderBackend}.
@@ -48,7 +50,27 @@ public final class Lwjgl3GLRenderBackend extends RenderBackend {
 
     @Override
     public void shutdown() {
-        // no-op
+        stopFileDrop();
+    }
+
+    @Override
+    public boolean supportsFileDrop() {
+        return true;
+    }
+
+    @Override
+    public void startFileDrop() {
+        GlfwFileDropWatcher.start();
+    }
+
+    @Override
+    public void stopFileDrop() {
+        GlfwFileDropWatcher.stop();
+    }
+
+    @Override
+    public List<String> pollDroppedFiles() {
+        return GlfwFileDropWatcher.pollDroppedFiles();
     }
 
     @Override
