@@ -95,7 +95,7 @@ class OcclusionCullerProvisionalVisibilityTest {
             new Vector3d(8.0, 8.0, 8.0)
         );
 
-        graph.lattice.findVisible((latticeIndex, regionId, sectionIndex, compactMeta, visible) -> {
+        graph.lattice.findVisible((latticeIndex, regionId, sectionIndex, chunkX, chunkY, chunkZ, compactMeta, visible) -> {
             RenderSection section = graph.lattice.sectionAt(latticeIndex);
             assertNotNull(section);
             assertSame(sectionsByIndex.get(sectionIndex), section);
