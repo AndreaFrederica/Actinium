@@ -76,6 +76,22 @@ Windows 10、NVIDIA GeForce RTX 5070 Laptop GPU（驱动 610.74）。
 > blend 钩子语义；glsm texgen 顶点着色器的逐分量写入模式被 NVIDIA 驱动 DCE 掉
 > `u_TexGenEyePlaneS`。
 
+> 2026-09-07 追加：Gnetum 1.4.3 HUD 分帧缓存与 Actinium 共存时半透明 HUD 元素（聊天背景、
+> 字幕、BossBar 等）透明度错误并随缓存 pass 轮转隔帧闪烁的修复——见下方 [模组与环境](#模组与环境)
+> 的 Gnetum 行与 [docs/compat/gnetum.md](compat/gnetum.md)。根因与 StellarCore HudCaching
+> 同族：glsm 重定向架空了 Gnetum 挂在 vanilla `GlStateManager.blendFunc` /
+> `OpenGlHelper.glBlendFunc` 上的预乘 alpha 覆盖钩子，缓存 FBO 写入直 alpha 而 blit 按预乘
+> 合成；修复为 `GnetumHudCachingCompatTransformer` 把 `Gnetum.rendering` 窗口镜像到
+> `GLSMConfig.hudCacheOverride`（commit `5d820b0e`，生产实机回归已确认）。
+>
+> 2026-09-07 再追加：Gnetum 与 Revo UI 共存时打开/关闭 GUI 背景渐变随缓存 pass 轮转
+> 闪烁——Gnetum 把 uie 的 `RenderGameOverlayEvent.Post` 监听器收入分帧缓存，Actinium 的
+> 渐变 defer/replay 管线因此被降为 1/3 帧率；修复为缓存捕捉窗口内
+> （`hudCacheOverride`）渐变直接画入缓存 FBO 而非 defer（commit `edf7c6f2`，复刻无
+> Actinium 时的已知良好路径），build 全绿、生产实机回归待确认。注：Gnetum 的 modid
+> 解析依赖 legacy Forge `ASMEventHandler.toString()` 前缀，在 Cleanroom 下整体失效
+> （全部落入 `gnetum_unknown` 桶），按 modid 排除的方案不可行。
+
 ## 光影包
 
 | 光影包                                | 版本            | 状态   | 已验证范围                                                          | 已知缺口      | Actinium 基线 |
@@ -119,6 +135,7 @@ Windows 10、NVIDIA GeForce RTX 5070 Laptop GPU（驱动 610.74）。
 | Scannable | 已验证 | 条件 Mixin（接管 `ProxyOptiFine` 探针，扫描波走其 overlay 路径） | 1.6.3.26（266784:3146549）：使用扫描器后无光影透视 / 光影全白拖影的根因是其 INJECT 路径换装主 FBO 深度 attachment（Actinium 下 `Framebuffer.depthBuffer` 为 0，"恢复"即卸下深度）；已引导其走 OptiFine 式 overlay 渲染路径，详见 [docs/compat/scannable.md](compat/scannable.md)；dev 运行验证通过（无光影透视与光影全白均消失、扫描波区域正确；相邻结果合并为聚类大框为 Scannable 固有设计） |
 | BetterPortals Refitted | 已验证 | `EndPortalRenderPolicy` 按调用来源分流（真实 TE 走替代渲染器；合成 TE 无光影走 glsm FFP/texgen、光影走替代渲染器并复刻 CONSTANT_ALPHA 淡出钩子）+ 管线按维度缓存消除看穿双 pass 的重载风暴 | 0.4.1：末地传送门看穿失效/星野条纹/光影卡顿地形消失/光影星野旁路均已修复（四层根因见 [docs/compat/betterportals.md](compat/betterportals.md)）；无光影与光影（BSL）场景看穿+星野+淡出+换维度均实机确认正常 |
 | Chocolate Quest Repoured | 已验证 | 无侵入（glsm compat shader 转换器修复：6 个 parse-breaking 旧式采样函数 pre-parse 改名 + 语法错误 Fail Fast 兜底） | 2.8.0B：共存启动 preinit 崩溃（`Failed to compile shader: 0`）已修复，根因为 glsl-transformation-lib 文法将 textureCube 等词法化为关键字 token 且 ANTLR 静默恢复产出畸形 GLSL（issue #123，见 [docs/compat/chocolate-quest-repoured.md](compat/chocolate-quest-repoured.md)）；dev 实机验证通过（CQR 2.8.0B + geckolib 3.0.31 + ReachFix 1.1.3 共存启动到标题界面，SphereRenderer 着色器编译正常；进世界时 CQR 在 Server thread 重载纹理集亦通过（调试命名注入无 GL 上下文时跳过，见同文档次生问题一节） |
+| Gnetum | 部分 | launchwrapper transformer（`GnetumHudCachingCompatTransformer` 镜像 `Gnetum.rendering` 窗口到 `GLSMConfig.hudCacheOverride`，复用 StellarCore HudCaching 的 GLSM 覆盖路径）+ revoui 渐变重定向在缓存窗口内改道（直接画入缓存 FBO） | 1.4.3（CurseForge 1220460 / Modrinth）：①HUD 分帧缓存致半透明 HUD 元素随 pass 轮转闪烁已修复并实机确认（根因同 StellarCore 模式 A：预乘覆盖钩子被 glsm 重定向架空），commit `5d820b0e`；②与 Revo UI 共存时 GUI 背景渐变随 pass 轮转闪烁已修复（缓存使渐变 defer 管线降为 1/3 帧率；修复为缓存窗口内直接画入缓存 FBO，commit `edf7c6f2`），build 全绿、生产实机回归待确认；已知缺口：手部缓存（`gnetum:minecraft_hand`，默认关）未适配、危险混合检测在 Actinium 下不生效、Gnetum 的 modid 解析在 Cleanroom 下整体失效（上游缺陷，见文档），详见 [docs/compat/gnetum.md](compat/gnetum.md) |
 
 ## 验证记录模板
 
