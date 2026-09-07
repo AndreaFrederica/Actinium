@@ -83,8 +83,10 @@
   （REQUIRES_RENDERER_RELOAD）。
 - 生效三前提：选项开、`renderChunksMany` 开、主地形 pass 的 vpMatrix 非 null；
   任一不满足即回退旧图遍历路径。
-- 观测手段：`-Dbitraster.stats=true` 开统计；`SectionLattice.rasterBufferSize()`/
-  `rasterBacktrackCount()` 可观察缓冲规模与回溯次数。
+- 观测手段：开 "Render Timing Debug" 选项（或 `-Dactinium.perfDebug`）后，每秒
+  `GLSM perf` 日志含 `chunk.scheduler`/`chunk.occlusionSearch` 等段；叠加
+  `-Dbitraster.stats=true` 后追加 `chunk.raster` 段（每秒 tested/occluded 及占比、
+  test/occlude 均耗时、缓冲规模、回溯次数）。
 
 ## 遗留验证项
 
