@@ -300,7 +300,7 @@ public class ChunkBuilder {
         this.localContext.destroy();
     }
 
-    public <TASK extends ChunkBuilderTask<OUTPUT>, OUTPUT> ChunkJobTyped<TASK, OUTPUT> scheduleTask(TASK task, boolean important,
+    public <TASK extends ChunkBuilderTask<OUTPUT>, OUTPUT> ChunkJobTyped<TASK, OUTPUT> scheduleTask(TASK task, boolean important, long priority,
                                                                                                     Consumer<@Nullable ChunkJobResult<OUTPUT>> consumer)
     {
         Objects.requireNonNull(task, "Task must be non-null");
@@ -311,7 +311,7 @@ public class ChunkBuilder {
 
         var job = new ChunkJobTyped<>(task, consumer);
 
-        this.queue.add(job, important);
+        this.queue.add(job, important ? ChunkJobQueue.IMPORTANT_PRIORITY : priority);
 
         return job;
     }
