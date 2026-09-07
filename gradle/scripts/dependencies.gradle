@@ -175,4 +175,9 @@ dependencies {
     // FluxLoading 1.4.1 (issue #102: re-entering a world leaves its loading screen image stuck
     // instead of fading out; dev-verifies the loading screen overlay compat)
     modImplementation 'curse.maven:fluxloading-1207328:7601634'
+
+    // Storage Drawers 5.5.3 + Chameleon 4.1.3 (issue #118: item icons drawn on drawer fronts show
+    // abnormal lighting without a shader pack; dev-verifies the lit item fast path)
+    modRuntimeOnly 'curse.maven:chameleon-230497:2450900'
+    modRuntimeOnly 'curse.maven:storage-drawers-223852:2952606'
 }

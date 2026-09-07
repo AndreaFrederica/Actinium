@@ -2,6 +2,8 @@ package com.dhj.actinium.render;
 
 import com.dhj.actinium.mixin.features.iris.RenderItemAccessor;
 import com.gtnewhorizons.angelica.glsm.GLStateManager;
+import com.gtnewhorizons.angelica.glsm.ffp.FragmentKey;
+import com.gtnewhorizons.angelica.glsm.ffp.VertexKey;
 import net.minecraft.client.renderer.EntityRenderer;
 import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.client.renderer.BufferBuilder;
@@ -35,6 +37,10 @@ public final class FastLitItemDisplayListCache {
     private static final int CACHEABLE_QUADS = 0;
     private static final int NON_ITEM_FORMAT = 1;
     private static final int MAX_SAMPLE_LINES = 8;
+    /** Slot count of {@link FragmentKey}'s packed state array ({@code FragmentKey.MAX_UNITS}, package-private there). */
+    private static final int FRAGMENT_KEY_SLOTS = 4;
+    /** Fingerprint layout: [0] = vertex state key, [1..FRAGMENT_KEY_SLOTS] = fragment state key. */
+    private static final int FINGERPRINT_SLOTS = 1 + FRAGMENT_KEY_SLOTS;
 
     private static final Map<CacheKey, CachedDisplayList> CACHE = new LinkedHashMap<CacheKey, CachedDisplayList>(64, 0.75F, true) {
         @Override
@@ -57,6 +63,7 @@ public final class FastLitItemDisplayListCache {
     private static int nonItemFormatFallbacks;
     private static int tintedQuadFallbacks;
     private static int compileFailedFallbacks;
+    private static int contextMismatchFallbacks;
     private static final Map<String, Integer> unstableModelSamples = new HashMap<>();
     private static final Map<String, Integer> nonItemFormatSamples = new HashMap<>();
 
@@ -89,6 +96,19 @@ public final class FastLitItemDisplayListCache {
         CacheKey lookupKey = new CacheKey(model, colors);
         CachedDisplayList cached = CACHE.get(lookupKey);
         if (cached != null) {
+            // Issue #118: a display list compiled under one FFP context (lighting / light
+            // enable bits / color material / fog / texture-unit state) must not be replayed
+            // under another one. Forge's renderLitItem contract renders simple models under
+            // the caller's current GL state, and the direct paths below honor that in any
+            // context; the cached draw only shares that guarantee when the FFP program
+            // selection inputs match the compile-time ones. On mismatch, fall through to
+            // the direct draw paths (e.g. an icon compiled in an inventory GUI and replayed
+            // by a drawer TESR whose lighting setup differs).
+            if (!contextFingerprintsMatch(cached.contextFingerprint, captureFfpContextFingerprint())) {
+                recordFallback(FallbackReason.CONTEXT_MISMATCH, model, null);
+                return null;
+            }
+
             hits++;
             return cached;
         }
@@ -159,6 +179,43 @@ public final class FastLitItemDisplayListCache {
         return DefaultVertexFormats.ITEM.equals(quad.getFormat());
     }
 
+    /**
+     * Captures the exact FFP program-variant selection inputs the replay path consumes
+     * ({@code ShaderManager.preDraw}: VertexKey bits + FragmentKey units). Two contexts with
+     * the same fingerprint replay the compiled draw with the same program/uniform combination
+     * the compile-time draw would have used. The vertex-format bits mirror
+     * {@code DefaultVertexFormats.ITEM} (position/color/uv/normal, no lightmap UV) — the only
+     * format this cache compiles — so the fingerprint varies solely with the GL state.
+     */
+    private static long[] captureFfpContextFingerprint() {
+        final long[] fragmentScratch = new long[FRAGMENT_KEY_SLOTS];
+        final int fragmentKeyLen = FragmentKey.packFromState(fragmentScratch);
+        return packFfpContextFingerprint(
+            VertexKey.packFromState(true, true, true, false),
+            fragmentScratch,
+            fragmentKeyLen
+        );
+    }
+
+    /**
+     * Packs the FFP program-variant selection inputs into a comparable fingerprint:
+     * slot 0 carries the VertexKey state bits, slots 1..n carry the FragmentKey units with
+     * unused tail slots zero-filled so a change in enabled-unit count is detected.
+     * Pure function; exercised directly by {@code FastLitItemDisplayListCacheTest}.
+     */
+    static long[] packFfpContextFingerprint(long vertexKeyState, long[] fragmentKey, int fragmentKeyLen) {
+        long[] fingerprint = new long[FINGERPRINT_SLOTS];
+        fingerprint[0] = vertexKeyState;
+        for (int i = 0; i < fragmentKeyLen; i++) {
+            fingerprint[1 + i] = fragmentKey[i];
+        }
+        return fingerprint;
+    }
+
+    static boolean contextFingerprintsMatch(long[] compiled, long[] current) {
+        return Arrays.equals(compiled, current);
+    }
+
     private static CachedDisplayList compile(RenderItem renderItem, List<BakedQuad> quads, int color, ItemStack stack) {
         int list = GLStateManager.glGenLists(1);
         if (list == 0) {
@@ -177,7 +234,7 @@ public final class FastLitItemDisplayListCache {
             GLStateManager.glEndList();
         }
 
-        return new CachedDisplayList(list, sprites);
+        return new CachedDisplayList(list, sprites, captureFfpContextFingerprint());
     }
 
     private static List<TextureAtlasSprite> collectSprites(List<BakedQuad> quads) {
@@ -207,6 +264,7 @@ public final class FastLitItemDisplayListCache {
             + ",nonItemFormat=" + nonItemFormatFallbacks
             + ",tintedQuad=" + tintedQuadFallbacks
             + ",compileFailed=" + compileFailedFallbacks
+            + ",contextMismatch=" + contextMismatchFallbacks
             + "]";
         stats += appendTopSamples(" unstableModels", unstableModelSamples);
         stats += appendTopSamples(" nonItemFormats", nonItemFormatSamples);
@@ -220,6 +278,7 @@ public final class FastLitItemDisplayListCache {
         nonItemFormatFallbacks = 0;
         tintedQuadFallbacks = 0;
         compileFailedFallbacks = 0;
+        contextMismatchFallbacks = 0;
         unstableModelSamples.clear();
         nonItemFormatSamples.clear();
         return stats;
@@ -247,6 +306,9 @@ public final class FastLitItemDisplayListCache {
                 break;
             case COMPILE_FAILED:
                 compileFailedFallbacks++;
+                break;
+            case CONTEXT_MISMATCH:
+                contextMismatchFallbacks++;
                 break;
         }
     }
@@ -303,7 +365,8 @@ public final class FastLitItemDisplayListCache {
         UNSTABLE_MODEL,
         NON_ITEM_FORMAT,
         TINTED_QUAD,
-        COMPILE_FAILED
+        COMPILE_FAILED,
+        CONTEXT_MISMATCH
     }
 
     private static final class CacheKey {
@@ -336,10 +399,12 @@ public final class FastLitItemDisplayListCache {
     public static final class CachedDisplayList {
         private final int list;
         private final List<TextureAtlasSprite> sprites;
+        private final long[] contextFingerprint;
 
-        private CachedDisplayList(int list, List<TextureAtlasSprite> sprites) {
+        private CachedDisplayList(int list, List<TextureAtlasSprite> sprites, long[] contextFingerprint) {
             this.list = list;
             this.sprites = sprites;
+            this.contextFingerprint = contextFingerprint;
         }
 
         public void render() {
