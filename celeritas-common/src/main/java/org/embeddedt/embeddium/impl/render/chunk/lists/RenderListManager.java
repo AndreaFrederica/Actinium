@@ -106,7 +106,7 @@ public class RenderListManager {
             throw new IllegalStateException("startGraphUpdate is for the terrain pass; use startShadowGraphUpdate");
         }
 
-        this.lattice.ensureWindowCovers(viewport.getChunkCoord(), searchDistance);
+        this.graph.ensureWindowCovers(viewport.getChunkCoord(), searchDistance);
 
         this.submitSearch(frame, regionIdsLength, targetQueueSize, visitor ->
                 this.lattice.findVisible(visitor, viewport, searchDistance, regionIdsLength, useOcclusionCulling, true, frame));
@@ -116,6 +116,10 @@ public class RenderListManager {
      * Start the shadow search. Only valid on the shadow manager, and only after the terrain manager has submitted
      * its search for this frame.
      *
+     * <p>The window must have been prepared with {@link #prepareSearchWindow} before this call, while no search was
+     * in flight: once the terrain search is submitted the lattice arrays must stay structurally stable until both
+     * searches have been joined, because the shadow search consumes the terrain search's visible-cell root set.
+     *
      * @param lightVector unit vector toward the shadow light, or {@code null} to run the frustum-only scan instead
      */
     public void startShadowGraphUpdate(Viewport shadowViewport, int frame, int regionIdsLength, float searchDistance, @Nullable Vector3fc lightVector, int targetQueueSize) {
@@ -123,10 +127,16 @@ public class RenderListManager {
             throw new IllegalStateException("startShadowGraphUpdate is for the shadow pass; use startGraphUpdate");
         }
 
-        this.lattice.ensureWindowCovers(shadowViewport.getChunkCoord(), searchDistance);
-
         this.submitSearch(frame, regionIdsLength, targetQueueSize, visitor ->
                 this.lattice.findShadowVisible(visitor, shadowViewport, searchDistance, regionIdsLength, lightVector, frame));
+    }
+
+    /**
+     * Prepare the shared lattice window for this manager's next search. Must only be called while no search is in
+     * flight on either pass; the {@link SectionGraph} enforces this with a fail-fast check.
+     */
+    public void prepareSearchWindow(Viewport viewport, float searchDistance) {
+        this.graph.ensureWindowCovers(viewport.getChunkCoord(), searchDistance);
     }
 
     private void submitSearch(int frame, int regionIdsLength, int targetQueueSize,

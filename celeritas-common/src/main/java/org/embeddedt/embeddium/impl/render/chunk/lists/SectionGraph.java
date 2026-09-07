@@ -4,6 +4,7 @@ import org.embeddedt.embeddium.impl.render.chunk.RenderSection;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.SectionLattice;
 import org.jetbrains.annotations.Nullable;
+import org.joml.Vector3ic;
 
 import java.util.ArrayDeque;
 import java.util.concurrent.CompletableFuture;
@@ -96,6 +97,17 @@ public final class SectionGraph {
         if (this.inFlight > 0) {
             throw new IllegalStateException("Attempted to update occlusion graph during occlusion!");
         }
+    }
+
+    /**
+     * Prepare the lattice window for an upcoming search. A window rebuild rewrites the lattice
+     * arrays in place, so — like every other structural mutation — it must never overlap a search
+     * running on the search thread. Both passes' window preparation therefore happens before any
+     * search of the frame is submitted (see {@code RenderSectionManager.updateForShadowPass}).
+     */
+    void ensureWindowCovers(Vector3ic cameraSectionPos, float searchDistance) {
+        this.assertSearchNotRunning();
+        this.lattice.ensureWindowCovers(cameraSectionPos, searchDistance);
     }
 
     public void attachRenderSection(RenderSection section) {

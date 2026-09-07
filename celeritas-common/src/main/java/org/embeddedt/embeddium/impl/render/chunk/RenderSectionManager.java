@@ -250,6 +250,12 @@ public abstract class RenderSectionManager {
         this.updateCameraPosition(playerViewport);
         this.shadowPassRanThisFrame = true;
 
+        // The shadow search's window preparation must run before the terrain search is submitted:
+        // once a search is in flight, the lattice arrays must stay structurally stable until it has
+        // been joined. The terrain search's own preparation still runs inside startGraphUpdate and
+        // has the final say on the window centre, since its root must land in the lattice interior.
+        this.shadowRenderListManager.prepareSearchWindow(shadowViewport, this.getSearchDistance(null));
+
         if (this.renderListManager.isNeedsUpdate()) {
             this.createTerrainRenderList(playerViewport, null, frame, spectator);
         }

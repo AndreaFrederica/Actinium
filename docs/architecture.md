@@ -287,6 +287,23 @@ GTNHLib ← glsm ← celeritas-common ← shader ← 根项目 src/main（compil
   - 其它：`asm.ProxyClassGenerator`、`biome.BiomeColorCache`、`runtime.EmbeddiumRuntimeOptions`、
     `texture.MipmapHelper`、`util.*`（集合、颜色、迭代器、随机、排序、任务）。
 
+### 遮挡搜索的并发契约
+
+地形 pass 与阴影 pass 共享同一个 `occlusion.SectionLattice` 与单条搜索线程
+（`lists.SectionGraph` 的单线程 executor）。一次可见性搜索会读写 lattice 的平行数组
+（`visitState`/`sectionMeta`/`regionOfCell`/`latticeSection`），因此自搜索提交到 join 期间
+这些数组必须保持结构稳定：
+
+- `attach/detach` 由 `SectionGraph.assertSearchNotRunning()` 兜底（在飞即抛异常）；
+- 元数据更新由 `SectionGraph.submitUpdateTask` 延迟到所有搜索 join 后执行；
+- 窗口准备（`SectionLattice.ensureWindowCovers`，可能触发 allocate/shiftRebase/rebase 就地
+  改写数组）只能经 `SectionGraph.ensureWindowCovers` 在无搜索在飞时执行。两个 pass 的窗口
+  准备统一在 `RenderSectionManager.updateForShadowPass` 提交任何搜索之前完成；阴影搜索的
+  窗口中心最终以地形搜索的 root 为准（其 root 必须落在 lattice 内部）。
+
+阴影搜索（`ShadowOcclusionCuller`）消费地形搜索当帧写出的 `visibleCells` 根集，因此两次
+搜索之间不允许任何结构变化（含窗口重建）。
+
 ## glsm/ 子项目（GL 状态跟踪与渲染后端抽象）
 
 核心原则：所有 GL 调用不直接调用 OpenGL，而是路由到 `BackendManager.RENDER_BACKEND`
