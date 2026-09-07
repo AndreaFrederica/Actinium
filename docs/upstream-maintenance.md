@@ -1,6 +1,6 @@
 # 上游代码维护
 
-最后更新：2026-07-10。
+最后更新：2026-09-07。
 
 Actinium 以源码形式内嵌了多个大型上游项目。当前仓库能确定本地首次导入 commit，
 但早期导入没有保存精确的上游 SHA。`THIRD_PARTY_NOTICES.md` 是当前来源清单，
@@ -17,6 +17,10 @@ Actinium 以源码形式内嵌了多个大型上游项目。当前仓库能确�
 | mitchej123 GL/LWJGL service | `4826cf8` | service 接口、provider 和相关 GL bridge |
 
 这些 commit 只能证明代码何时进入 Actinium，不能替代上游 SHA。
+
+Celeritas 上游（https://git.taumc.org/embeddedt/celeritas，stonecutter 分支）的同步基准
+已推进至 `fe57c60fa`（2026-09-07，见 `sync-celeritas-fe57c60fa.md`；此前依次为
+`f15085d4`、`7190f87d8`）。上游镜像仓库在 `D:/Code/celeritas-mirror`。
 
 ## 更新流程
 
