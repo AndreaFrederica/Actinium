@@ -483,6 +483,15 @@ public final class SectionLattice {
         return this.culler.rasterBufferSize();
     }
 
+    /**
+     * Returns the nanoTime start/end of the most recent main-culler search and clears it, so each submitted
+     * search's timing is consumed exactly once by the render thread that joins it. Null when perf debug was
+     * off for that search or the most recent search ran on the shadow-only culler.
+     */
+    public long @Nullable [] pollLastSearchTiming() {
+        return this.culler.pollLastSearchTiming();
+    }
+
     public int rasterBacktrackCount() {
         return this.culler.rasterBacktrackCount();
     }

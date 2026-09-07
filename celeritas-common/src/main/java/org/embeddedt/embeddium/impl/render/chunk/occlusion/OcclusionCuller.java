@@ -1,5 +1,6 @@
 package org.embeddedt.embeddium.impl.render.chunk.occlusion;
 
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebug;
 import grondag.bitraster.AbstractRasterizer;
 import org.embeddedt.embeddium.impl.common.util.MathUtil;
 import org.embeddedt.embeddium.impl.render.chunk.LocalSectionIndex;
@@ -121,6 +122,14 @@ public class OcclusionCuller {
     private boolean isCameraInUnloadedSection;
     private boolean isMultiRootSearch;
 
+    /**
+     * nanoTime start/end of the most recent {@link #findVisible} run, recorded only when perf debug is on.
+     * Written on whichever thread the search runs (the shared search thread when async); consumed exactly once
+     * by the render thread after it joins the search, which establishes the happens-before edge. Null when
+     * perf debug was off or the timing has already been consumed.
+     */
+    private long @Nullable [] lastSearchTiming;
+
     // Lattice index of the camera section when it is the search root, else -1. It is visited inline, never tested.
     private int cameraSectionIndex;
 
@@ -157,6 +166,8 @@ public class OcclusionCuller {
                             boolean recordVisible,
                             int frame)
     {
+        final long searchStartNanos = GLSMPerfDebug.isEnabled() ? System.nanoTime() : 0L;
+
         // Pre-size so enqueue is a bare store: at most one entry per installed cell.
         int installed = this.lattice.installedCount;
         if (this.queue.length < installed) {
@@ -204,6 +215,20 @@ public class OcclusionCuller {
             this.lattice.visibleCount = this.visibleCount;
         }
         this.visitState = null;
+
+        if (searchStartNanos != 0L) {
+            this.lastSearchTiming = new long[]{searchStartNanos, System.nanoTime()};
+        }
+    }
+
+    /**
+     * Returns the nanoTime start/end of the most recent {@link #findVisible} run and clears it, so each
+     * search's timing is consumed exactly once. Null when perf debug was off for that search.
+     */
+    long @Nullable [] pollLastSearchTiming() {
+        long[] timing = this.lastSearchTiming;
+        this.lastSearchTiming = null;
+        return timing;
     }
 
     /**

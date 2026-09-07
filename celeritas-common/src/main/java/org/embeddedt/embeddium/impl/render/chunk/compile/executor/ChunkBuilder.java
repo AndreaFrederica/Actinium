@@ -244,6 +244,21 @@ public class ChunkBuilder {
     }
 
     /**
+     * Returns the most recent sort-to-mesh cost ratio the scheduling controller computed, for perf reporting.
+     */
+    public double getSortsPerMesh() {
+        return this.sortsPerMesh;
+    }
+
+    /**
+     * Returns the exponential moving average of the frame time (scheduling tick interval) in nanoseconds, for
+     * perf reporting.
+     */
+    public double getFrameTimeEmaNanos() {
+        return this.frameTimeEma;
+    }
+
+    /**
      * Returns the remaining number of tasks allowed before reaching the current in-flight target.
      */
     public int getSchedulingBudget() {

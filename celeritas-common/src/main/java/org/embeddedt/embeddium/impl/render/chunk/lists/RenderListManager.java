@@ -1,6 +1,7 @@
 package org.embeddedt.embeddium.impl.render.chunk.lists;
 
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebug;
 import lombok.Getter;
 import lombok.Setter;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
@@ -166,6 +167,14 @@ public class RenderListManager {
         if (currentOcclusionFuture != null) {
             VisibleChunkCollector visitor = currentOcclusionFuture.join();
 
+            // The join establishes happens-before with the search thread, so the timing the search recorded
+            // into the culler is visible here. Consume it on the render thread: GLSMPerfDebug's counters are
+            // single-threaded and must never be written from the search thread.
+            final long[] searchTiming = this.lattice.pollLastSearchTiming();
+            if (searchTiming != null) {
+                GLSMPerfDebug.record(GLSMPerfDebug.Stage.CHUNK_OCCLUSION_SEARCH, searchTiming[0], searchTiming[1]);
+            }
+
             this.renderLists = visitor.createRenderLists();
             this.rebuildLists = visitor.getRebuildLists();
 
@@ -219,6 +228,15 @@ public class RenderListManager {
             return "";
         }
         return this.sectionTicker.getDebugString();
+    }
+
+    /** Current raster buffer size as {@code width x height} in pixels, or null when raster culling is off. */
+    public @Nullable String rasterBufferSize() {
+        return this.lattice.rasterBufferSize();
+    }
+
+    public int rasterBacktrackCount() {
+        return this.lattice.rasterBacktrackCount();
     }
 
     private RenderListDebugStatistics computeDebugStatistics() {

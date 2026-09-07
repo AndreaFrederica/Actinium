@@ -3,6 +3,9 @@ package org.embeddedt.embeddium.impl.render.chunk;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.*;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebug;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebugHooks;
+import grondag.bitraster.AbstractRasterizer;
 import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -12,6 +15,7 @@ import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
 import org.embeddedt.embeddium.impl.gl.profiling.TimerQueryManager;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildContext;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
+import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkSortOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkTaskOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.executor.ChunkBuilder;
 import org.embeddedt.embeddium.impl.render.chunk.compile.executor.ChunkJobMetricsTracker;
@@ -28,7 +32,9 @@ import org.embeddedt.embeddium.impl.render.chunk.lists.SectionGraph;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SectionTicker;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SortedRenderLists;
 import org.embeddedt.embeddium.impl.render.chunk.metrics.RenderSectionMetricsTracker;
+import org.embeddedt.embeddium.impl.render.chunk.metrics.RasterPerfStatsDiffer;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
+import org.embeddedt.embeddium.impl.render.chunk.occlusion.RasterOccluder;
 import org.embeddedt.embeddium.impl.render.chunk.region.RenderRegion;
 import org.embeddedt.embeddium.impl.render.chunk.region.RenderRegionManager;
 import org.embeddedt.embeddium.impl.render.chunk.fog.FogService;
@@ -134,6 +140,14 @@ public abstract class RenderSectionManager {
     @Getter
     protected final RenderSectionMetricsTracker sectionMetricsTracker = new RenderSectionMetricsTracker();
 
+    /**
+     * GLSM perf report extension, kept as a field so {@link #destroy()} can deregister the identical
+     * instance. Registered and invoked on the render thread, matching GLSMPerfDebugHooks' threading contract.
+     */
+    private final Supplier<String> perfStatsProvider = this::dumpPerfStats;
+
+    private final RasterPerfStatsDiffer rasterStatsDiffer = new RasterPerfStatsDiffer();
+
     @Deprecated
     public RenderSectionManager(RenderPassConfiguration<?> configuration, Supplier<ChunkBuildContext> contextSupplier,
                                 BiFunction<RenderDevice, RenderPassConfiguration<?>, ChunkRenderer> chunkRenderer,
@@ -168,6 +182,8 @@ public abstract class RenderSectionManager {
         }
 
         this.disabledRenderPasses = new ReferenceArraySet<>();
+
+        GLSMPerfDebugHooks.addStatsProvider(this.perfStatsProvider);
     }
 
     protected abstract AsyncOcclusionMode getAsyncOcclusionMode();
@@ -538,6 +554,15 @@ public abstract class RenderSectionManager {
     }
 
     public void updateChunks(boolean updateImmediately) {
+        final long perfStart = GLSMPerfDebug.isEnabled() ? GLSMPerfDebug.begin(GLSMPerfDebug.Stage.CHUNK_UPDATE_CHUNKS) : 0L;
+        try {
+            this.updateChunks0(updateImmediately);
+        } finally {
+            GLSMPerfDebug.end(GLSMPerfDebug.Stage.CHUNK_UPDATE_CHUNKS, perfStart);
+        }
+    }
+
+    private void updateChunks0(boolean updateImmediately) {
         this.regions.update();
         this.jobMetricsTracker.tick();
 
@@ -828,6 +853,10 @@ public abstract class RenderSectionManager {
     }
 
     public void destroy() {
+        // destroy() runs on the render thread (SimpleWorldRenderer.unloadWorld performs GL work around it),
+        // the same thread the provider was registered on.
+        GLSMPerfDebugHooks.removeStatsProvider(this.perfStatsProvider);
+
         this.finishAllGraphUpdates();
 
         this.builder.shutdown(); // stop all the workers, and cancel any tasks
@@ -1196,6 +1225,85 @@ public abstract class RenderSectionManager {
 
     public String getTickerDebugString() {
         return this.getCurrentRenderListManager().getTickerDebugString();
+    }
+
+    /**
+     * Extra stats appended to the periodic GLSM perf report. Invoked on the render thread once per report
+     * interval (plus once whenever perf debug toggles, which drains the interval the same way the other
+     * dump-and-reset providers do). Only called while perf debug is enabled, so it does not re-check.
+     */
+    private String dumpPerfStats() {
+        final StringBuilder sb = new StringBuilder(192);
+
+        sb.append("chunk.scheduler[");
+        this.appendJobStats(sb, "build", ChunkBuildOutput.class);
+        sb.append(',');
+        this.appendJobStats(sb, "sort", ChunkSortOutput.class);
+        sb.append(",targetInFlight=").append(this.builder.getTargetQueueSize())
+            .append(",sortsPerMesh=").append(String.format("%.1f", this.builder.getSortsPerMesh()))
+            .append(",frameMs=").append(String.format("%.2f", this.builder.getFrameTimeEmaNanos() / 1_000_000.0))
+            .append(",queued=").append(this.builder.getScheduledJobCount())
+            .append(",busy=").append(this.builder.getBusyThreadCount()).append('/').append(this.builder.getTotalThreadCount());
+        this.appendSlowestSections(sb);
+        sb.append(']');
+
+        if (AbstractRasterizer.STATS) {
+            this.appendRasterStats(sb);
+        }
+
+        return sb.toString();
+    }
+
+    private void appendJobStats(StringBuilder sb, String name, Class<? extends ChunkTaskOutput> outputType) {
+        final double emaNanos = this.jobMetricsTracker.getAverageExecutionNanos(outputType, Double.NaN);
+        final var data = this.jobMetricsTracker.getMetrics().get(outputType);
+        sb.append(name).append("EmaMs=").append(Double.isNaN(emaNanos) ? "n/a" : String.format("%.2f", emaNanos / 1_000_000.0))
+            .append(',').append(name).append("PerSec=").append(data != null ? data.getObservationsInLastTimeInterval() : 0);
+    }
+
+    private void appendSlowestSections(StringBuilder sb) {
+        final var slowest = new ArrayList<>(this.sectionMetricsTracker.getSlowestSections());
+        if (slowest.isEmpty()) {
+            return;
+        }
+        // The tracker's heap iterates in no particular order, so sort here to take the true top 3.
+        slowest.sort(RenderSectionMetricsTracker.BY_BUILD_TIME.reversed());
+        sb.append(",slowest=");
+        for (int i = 0, n = Math.min(3, slowest.size()); i < n; i++) {
+            final RenderSection section = slowest.get(i);
+            if (i > 0) {
+                sb.append(';');
+            }
+            sb.append('(').append(section.getChunkX()).append(',').append(section.getChunkY()).append(',').append(section.getChunkZ())
+                .append(")=").append(String.format("%.2f", section.getLastBuildDurationNanos() / 1_000_000.0)).append("ms");
+        }
+    }
+
+    /**
+     * Raster culling counters only exist when {@code -Dbitraster.stats} is set. The raster counters are
+     * cumulative and written by whichever thread ran the search; the differ turns them into per-interval
+     * rates here on the render thread. Values may be stale by one search while async culling is in flight,
+     * which is acceptable for a diagnostic line.
+     */
+    private void appendRasterStats(StringBuilder sb) {
+        final var diff = this.rasterStatsDiffer.diff(
+                RasterOccluder.STAT_SECTIONS, RasterOccluder.STAT_OCCLUDED_SECTIONS,
+                RasterOccluder.STAT_TEST_NANOS, RasterOccluder.STAT_OCCLUDE_NANOS);
+
+        sb.append(" chunk.raster[testedPerSec=").append(diff.testedSections())
+            .append(",occludedPerSec=").append(diff.occludedSections());
+        final double fraction = diff.occludedFraction();
+        sb.append('(').append(Double.isNaN(fraction) ? "n/a" : String.format("%.1f%%", fraction * 100.0)).append(')');
+        final double testUs = diff.testMicrosPerSection();
+        sb.append(",testAvgUs=").append(Double.isNaN(testUs) ? "n/a" : String.format("%.2f", testUs));
+        final double occludeUs = diff.occludeMicrosPerSection();
+        sb.append(",occludeAvgUs=").append(Double.isNaN(occludeUs) ? "n/a" : String.format("%.2f", occludeUs));
+        final String bufferSize = this.renderListManager.rasterBufferSize();
+        if (bufferSize != null) {
+            sb.append(",buffer=").append(bufferSize);
+        }
+        sb.append(",backtracks=").append(this.renderListManager.rasterBacktrackCount())
+            .append(']');
     }
 
 }
