@@ -148,9 +148,10 @@ public class RenderSection extends AbstractSection {
     public void updateCachedContextDataFlags() {
         int flags = this.contextData != null ? this.contextData.getVisualBitmaskForSection() : 0;
         long visibilityData = this.contextData != null ? this.contextData.visibilityData : VisibilityEncoding.NULL;
+        boolean hasOccluderData = this.contextData != null && this.contextData.occluderBoxes != null;
 
-        this.writeMetadata(PackedSectionMetadata.withVisibilityData(
-                PackedSectionMetadata.withVisualsFlags(this.packedMetadata, flags), visibilityData));
+        this.writeMetadata(PackedSectionMetadata.withHasOccluderData(PackedSectionMetadata.withVisibilityData(
+                PackedSectionMetadata.withVisualsFlags(this.packedMetadata, flags), visibilityData), hasOccluderData));
     }
 
     /** Writes packed metadata and publishes the new value to the lattice mirror when attached. */

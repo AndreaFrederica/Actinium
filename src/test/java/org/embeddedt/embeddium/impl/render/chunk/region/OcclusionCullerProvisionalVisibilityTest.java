@@ -61,7 +61,7 @@ class OcclusionCullerProvisionalVisibilityTest {
             setVisibility(provisional, VisibilityEncoding.NULL);
         }
 
-        SectionLattice lattice = new SectionLattice(0, 1, false);
+        SectionLattice lattice = new SectionLattice(0, 1, false, false);
         lattice.attach(origin);
         lattice.attach(provisional);
         lattice.attach(destination);
