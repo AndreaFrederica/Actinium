@@ -1,6 +1,8 @@
 package org.embeddedt.embeddium.impl.render.chunk.compile.executor;
 
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildContext;
+import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
+import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkSortOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -10,6 +12,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -33,17 +36,69 @@ public class ChunkBuilder {
      */
     private static final int TASK_QUEUE_LIMIT_PER_WORKER = 2;
 
-    /** Initial in-flight target per worker before measured throughput is available. */
-    private static final int WARM_START_PER_WORKER = 32;
-
-    /** Dampens target decay so temporary worker slowdown does not immediately discard useful queue capacity. */
-    private static final int TARGET_DECAY_DAMPING = 2;
-
     /** Keeps the legacy fixed floor available as a local fallback during tuning or regression diagnosis. */
     private static final boolean ENABLE_ADAPTIVE_SCHEDULING = true;
 
     /** Enables target-change logging for local tuning. */
     private static final boolean DEBUG_ADAPTIVE_SCHEDULING = false;
+
+    /**
+     * Upper bound on the in-flight target per worker thread. The feedforward estimate is bounded by actual
+     * throughput, so this only comes into play at very low frame rates or with unusually cheap tasks. It caps how
+     * many snapshots the render thread will take in a single frame and how much memory is held by pending tasks.
+     */
+    private static final int MAX_TARGET_PER_WORKER = 64;
+
+    /**
+     * Multiplier applied to the break-even queue depth so that variance in task cost and frame time does not
+     * starve the workers just before the next top-up.
+     */
+    private static final double SCHEDULING_HEADROOM = 1.5;
+
+    /**
+     * Smoothing factor for the exponential moving average of the frame time (top-up interval).
+     */
+    private static final double FRAME_TIME_EMA_ALPHA = 0.15;
+
+    /**
+     * Frame time assumed before any frames have been observed. A freshly initialized builder always starts out
+     * with a full backlog of initial builds (world join, dimension change, render-distance change, or resource
+     * reload) at a low frame rate, so this is deliberately pessimistic.
+     */
+    private static final long INITIAL_FRAME_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
+
+    /**
+     * Longest single frame interval fed into the frame time average. Longer stalls (e.g. the freeze while the world
+     * first loads, or the window being minimized) are clamped so that they do not inflate the target.
+     */
+    private static final long MAX_FRAME_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
+
+    /**
+     * Execution time assumed for a mesh task before any have completed.
+     */
+    private static final double DEFAULT_MESH_TASK_NANOS = TimeUnit.MILLISECONDS.toNanos(2);
+
+    /**
+     * Execution time assumed for a sort task before any have completed.
+     */
+    private static final double DEFAULT_SORT_TASK_NANOS = TimeUnit.MICROSECONDS.toNanos(500);
+
+    /**
+     * Bounds on how many sort tasks are considered equivalent to one mesh task when converting the leftover mesh
+     * budget into a sort budget.
+     */
+    private static final double MIN_SORTS_PER_MESH = 1.0, MAX_SORTS_PER_MESH = 16.0;
+
+    /**
+     * The sort-to-mesh cost ratio used when adaptive scheduling is disabled.
+     */
+    private static final double LEGACY_SORTS_PER_MESH = 4.0;
+
+    /**
+     * Minimum number of sort tasks that may be dispatched in a frame regardless of the leftover mesh budget, so that
+     * translucency sorting is never fully starved by a sustained rebuild backlog.
+     */
+    private static final int MIN_SORT_BUDGET = 4;
 
     private final ChunkJobQueue queue = new ChunkJobQueue();
 
@@ -51,11 +106,28 @@ public class ChunkBuilder {
 
     private final AtomicInteger busyThreadCount = new AtomicInteger();
 
-    /** Current desired number of queued in-flight tasks, bounded below by the scheduling floor. */
+    /**
+     * The current target number of in-flight mesh tasks. Recomputed each frame by {@link #tickSchedulingBudget}
+     * from the observed frame time and task cost; see that method for the derivation.
+     */
     private int targetInFlight;
 
-    /** Whether the previous dispatch stopped at its budget while more rebuild work remained. */
-    private boolean lastDispatchBudgetLimited;
+    /**
+     * How many sort tasks the workers can complete in the time it takes them to complete one mesh task, per the
+     * most recent tick.
+     */
+    private double sortsPerMesh;
+
+    /**
+     * Exponential moving average of the interval between consecutive scheduling ticks, i.e. the period over which
+     * the queue must hold enough work to keep the workers busy.
+     */
+    private double frameTimeEma = INITIAL_FRAME_NANOS;
+
+    /**
+     * Timestamp of the previous scheduling tick, or 0 if none has happened yet.
+     */
+    private long lastTickNanos;
 
     private final ChunkBuildContext localContext;
 
@@ -85,13 +157,9 @@ public class ChunkBuilder {
 
         this.managedBlocker = managedBlocker;
 
-        if (ENABLE_ADAPTIVE_SCHEDULING && !this.threads.isEmpty()) {
-            long warmStartTarget = (long) WARM_START_PER_WORKER * this.threads.size();
-            this.targetInFlight = (int) Math.min(Integer.MAX_VALUE,
-                    Math.max(this.getSchedulingFloor(), warmStartTarget));
-        } else {
-            this.targetInFlight = this.getSchedulingFloor();
-        }
+        // Seed the target from the priors so the first frame's dispatch is sensible even before any frame or task
+        // has been observed.
+        this.recomputeTargets(DEFAULT_MESH_TASK_NANOS, DEFAULT_SORT_TASK_NANOS);
     }
 
     /**
@@ -102,33 +170,70 @@ public class ChunkBuilder {
     }
 
     /**
-     * Advances the adaptive target once for the current frame.
+     * Advances the scheduling controller by one frame. Must be called exactly once per frame, before the per-frame
+     * dispatch reads {@link #getSchedulingBudget()}.
+     *
+     * <p>The queue is only topped up once per frame, so it has to hold enough work to keep every worker busy until
+     * the next top-up. The break-even depth is therefore</p>
+     * <pre>workers * frameTime / avgTaskTime</pre>
+     * <p>and the target is that depth times a headroom factor, clamped to the floor and to
+     * {@link #MAX_TARGET_PER_WORKER}. Both inputs are exponential moving averages of observed values: the frame time
+     * is the interval between ticks, and the task time comes from the worker-side execution times in the metrics
+     * tracker. The estimate is recomputed from scratch each frame and carries no other state, so it tracks the frame
+     * rate down as well as up and cannot get stuck at a stale value.</p>
+     *
+     * <p>Because the target is derived from observed rates rather than from a frame-time goal, it needs no
+     * machine-specific tuning: the only constants are a dimensionless headroom ratio and a safety cap.</p>
      */
-    public void tickSchedulingBudget() {
+    public void tickSchedulingBudget(ChunkJobMetricsTracker metrics) {
+        long now = System.nanoTime();
+
+        if (this.lastTickNanos != 0) {
+            long frameNanos = Math.min(Math.max(0, now - this.lastTickNanos), MAX_FRAME_NANOS);
+            this.frameTimeEma += FRAME_TIME_EMA_ALPHA * (frameNanos - this.frameTimeEma);
+        }
+
+        this.lastTickNanos = now;
+
         if (!ENABLE_ADAPTIVE_SCHEDULING) {
+            // Legacy behavior: the target stays pinned at the floor, so getSchedulingBudget() yields the fixed
+            // per-worker budget.
             return;
         }
 
-        int floor = this.getSchedulingFloor();
-        int queued = this.queue.size();
-        boolean workerStarved = this.queue.checkAndClearWorkerBlocked();
         int previousTarget = this.targetInFlight;
 
-        if (workerStarved && this.lastDispatchBudgetLimited) {
-            this.targetInFlight = (int) Math.min(Integer.MAX_VALUE, (long) this.targetInFlight * 2);
-        } else if (queued > floor) {
-            int excess = queued - floor;
-            int decayStep = Math.max(1, excess / TARGET_DECAY_DAMPING);
-            this.targetInFlight -= decayStep;
-        }
-
-        this.targetInFlight = Math.max(floor, this.targetInFlight);
+        this.recomputeTargets(
+                metrics.getAverageExecutionNanos(ChunkBuildOutput.class, DEFAULT_MESH_TASK_NANOS),
+                metrics.getAverageExecutionNanos(ChunkSortOutput.class, DEFAULT_SORT_TASK_NANOS));
 
         if (DEBUG_ADAPTIVE_SCHEDULING && this.targetInFlight != previousTarget) {
-            LOGGER.info("Adaptive scheduling target {} {} -> {} (queued={}, starved={}, budgetLimited={})",
-                    this.targetInFlight > previousTarget ? "grew" : "shrank",
-                    previousTarget, this.targetInFlight, queued, workerStarved, this.lastDispatchBudgetLimited);
+            LOGGER.info("Scheduling target {} -> {} (frame={}us, queued={}, sortsPerMesh={})",
+                    previousTarget, this.targetInFlight, (long) (this.frameTimeEma / 1000), this.queue.size(),
+                    String.format("%.1f", this.sortsPerMesh));
         }
+    }
+
+    private void recomputeTargets(double meshTaskNanos, double sortTaskNanos) {
+        int floor = this.getSchedulingFloor();
+
+        if (!ENABLE_ADAPTIVE_SCHEDULING || this.threads.isEmpty()) {
+            // When threading or adaptive scheduling are disabled, the target should always be the smallest queue size.
+            this.targetInFlight = floor;
+            this.sortsPerMesh = LEGACY_SORTS_PER_MESH;
+            return;
+        }
+
+        // Guard against a degenerate average (a task that measured as instantaneous) blowing the target up to the cap.
+        meshTaskNanos = Math.max(1.0, meshTaskNanos);
+        sortTaskNanos = Math.max(1.0, sortTaskNanos);
+
+        double perWorker = this.frameTimeEma / meshTaskNanos * SCHEDULING_HEADROOM;
+        long target = (long) Math.ceil(perWorker * this.threads.size());
+        long cap = (long) MAX_TARGET_PER_WORKER * this.threads.size();
+
+        this.targetInFlight = (int) Math.max(floor, Math.min(target, cap));
+        this.sortsPerMesh = Math.max(MIN_SORTS_PER_MESH, Math.min(meshTaskNanos / sortTaskNanos, MAX_SORTS_PER_MESH));
     }
 
     /**
@@ -146,10 +251,14 @@ public class ChunkBuilder {
     }
 
     /**
-     * Records whether the previous dispatch was limited by this builder's budget.
+     * Returns the number of sort tasks which should be scheduled this frame. Sorts are dispatched after mesh tasks
+     * and fill whatever worker time the mesh dispatch left over, so the remaining mesh budget is converted into an
+     * equivalent number of sorts using the measured cost ratio of the two task types. A small minimum ensures sorts
+     * are never fully starved by a sustained rebuild backlog.
      */
-    public void setDispatchBudgetLimited(boolean budgetLimited) {
-        this.lastDispatchBudgetLimited = budgetLimited;
+    public int getSortSchedulingBudget() {
+        long budget = (long) Math.ceil(this.getSchedulingBudget() * this.sortsPerMesh);
+        return (int) Math.max(MIN_SORT_BUDGET, Math.min(Integer.MAX_VALUE, budget));
     }
 
     /**

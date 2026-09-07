@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChunkJobQueueTest {
     @Test
-    void reportsBlockedWorkerAndPreservesPermitSemantics() throws Exception {
+    void blockedWorkerWakesAndReceivesAddedJob() throws Exception {
         ChunkJobQueue queue = new ChunkJobQueue();
         CountDownLatch workerStarted = new CountDownLatch(1);
         AtomicReference<ChunkJob> returnedJob = new AtomicReference<>();
@@ -32,18 +32,18 @@ class ChunkJobQueueTest {
             worker.start();
             assertTrue(workerStarted.await(1, TimeUnit.SECONDS));
 
+            // Semaphore.acquire parks the worker; wait until it is actually blocked before adding work.
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            boolean workerBlocked = false;
+            boolean workerWaiting = false;
             while (System.nanoTime() < deadline) {
-                if (queue.checkAndClearWorkerBlocked()) {
-                    workerBlocked = true;
+                if (worker.getState() == Thread.State.WAITING) {
+                    workerWaiting = true;
                     break;
                 }
                 Thread.yield();
             }
 
-            assertTrue(workerBlocked);
-            assertFalse(queue.checkAndClearWorkerBlocked());
+            assertTrue(workerWaiting, "The worker did not block on the empty queue before the deadline");
 
             TestJob job = new TestJob();
             queue.add(job, false);
