@@ -46,19 +46,26 @@ public class MixinLate implements ILateMixinLoader {
         }
     }
 
-    /** Returns the conditional configs whose declared mod ids are all loaded. */
+    /**
+     * Returns the conditional configs whose gating expression matches the loaded mods.
+     * The value syntax is {@code modA,modB|modC}: comma-separated ids form an AND group,
+     * {@code |} separates alternative groups, and a config loads when any group matches.
+     */
     static List<String> configsFor(Predicate<String> loadedMods) {
         List<String> mixins = new ArrayList<>();
         CONDITIONAL_CONFIGS.forEach((config, modList) -> {
-            boolean allLoaded = true;
-            for (String modId : ((String) modList).split(",")) {
-                if (!loadedMods.test(modId.trim())) {
-                    allLoaded = false;
+            for (String alternative : ((String) modList).split("\\|")) {
+                boolean allLoaded = true;
+                for (String modId : alternative.split(",")) {
+                    if (!loadedMods.test(modId.trim())) {
+                        allLoaded = false;
+                        break;
+                    }
+                }
+                if (allLoaded) {
+                    mixins.add((String) config);
                     break;
                 }
-            }
-            if (allLoaded) {
-                mixins.add((String) config);
             }
         });
         return mixins;
