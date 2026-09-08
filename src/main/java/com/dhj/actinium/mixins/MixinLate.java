@@ -47,28 +47,50 @@ public class MixinLate implements ILateMixinLoader {
     }
 
     /**
-     * Returns the conditional configs whose gating expression matches the loaded mods.
-     * The value syntax is {@code modA,modB|modC}: comma-separated ids form an AND group,
-     * {@code |} separates alternative groups, and a config loads when any group matches.
+     * Returns the conditional configs whose gating expression matches the runtime.
+     * The value syntax is {@code modA,modB|modC}: comma-separated requirements form an
+     * AND group, {@code |} separates alternative groups, and a config loads when any
+     * group matches. A requirement is a mod id, or {@code class:<binary name>} to probe
+     * for a class instead (for compat layers gated on embedded third-party code rather
+     * than a mod container).
      */
     static List<String> configsFor(Predicate<String> loadedMods) {
+        return configsFor(loadedMods, MixinLate::classPresent);
+    }
+
+    static List<String> configsFor(Predicate<String> loadedMods, Predicate<String> classPresent) {
         List<String> mixins = new ArrayList<>();
         CONDITIONAL_CONFIGS.forEach((config, modList) -> {
             for (String alternative : ((String) modList).split("\\|")) {
-                boolean allLoaded = true;
-                for (String modId : alternative.split(",")) {
-                    if (!loadedMods.test(modId.trim())) {
-                        allLoaded = false;
+                boolean allPresent = true;
+                for (String requirement : alternative.split(",")) {
+                    if (!requirementMet(requirement.trim(), loadedMods, classPresent)) {
+                        allPresent = false;
                         break;
                     }
                 }
-                if (allLoaded) {
+                if (allPresent) {
                     mixins.add((String) config);
                     break;
                 }
             }
         });
         return mixins;
+    }
+
+    private static final String CLASS_PREFIX = "class:";
+
+    private static boolean requirementMet(String requirement, Predicate<String> loadedMods, Predicate<String> classPresent) {
+        if (requirement.startsWith(CLASS_PREFIX)) {
+            return classPresent.test(requirement.substring(CLASS_PREFIX.length()));
+        }
+        return loadedMods.test(requirement);
+    }
+
+    /** Resource-probes the class without initializing it. */
+    private static boolean classPresent(String className) {
+        String resource = className.replace('.', '/') + ".class";
+        return MixinLate.class.getClassLoader().getResource(resource) != null;
     }
 
     private static Properties loadConditions() {

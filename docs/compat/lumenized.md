@@ -11,7 +11,8 @@
 - 关键点：两个模组包含**同包同名**的 bloom 实现类（`gregtech.client.utils.BloomEffectUtil`
   / `RenderUtil` / `DepthTextureUtil`、`gregtech.client.shader.Shaders`、
   `gregtech.client.shader.postprocessing.BloomEffect`），一套 Mixin 即可同时覆盖。
-  二者不会共存（类冲突），门控为 OR：`mixins.actinium.lumenized.json=lumenized|gregtech`。
+  二者不会共存（类冲突），门控为类探测：`mixins.actinium.lumenized.json=class:gregtech.client.utils.BloomEffectUtil`，
+  任一模组提供该 bloom 类即加载兼容层，与 mod id 无关。
 - 挂载点差异：Lumenized 用 Mixin 在 `renderWorldPass` 第 4 处 `renderBlockLayer`
   （TRANSLUCENT）之后追加调用；GTCEu 用 ASM（`GregTechTransformer`）把该调用点直接替换为
   `BloomEffectUtil.renderBloomBlockLayer`。方法体结构也有差异：Lumenized 将全部流程内联在
