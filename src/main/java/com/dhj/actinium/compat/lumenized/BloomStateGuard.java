@@ -12,15 +12,17 @@ import org.lwjgl.opengl.GL30;
  * Save/restore of the GLSM-tracked GL state around the GTCEu/Lumenized bloom pass.
  *
  * <p>The bloom pass ({@code BloomEffectUtil.renderBloomBlockLayer}) re-binds framebuffers,
- * runs external CCL shader programs and re-points texture units 0/1 at its own FBO
- * textures. Most of that state is repaired by the vanilla code that follows the
- * translucent pass, but not all of it: the first-person hand pass that runs right after
- * renders fully black when any of the pieces it relies on (program 0, main framebuffer,
- * texture-unit bindings/enables, blend/depth/cull state) is left disturbed.
+ * runs external CCL shader programs and re-points texture units at its own FBO
+ * textures. The default Unreal pipeline ({@code BloomEffect.renderUnreal}) enables
+ * {@code GL_TEXTURE_2D} on units 0..nMips-1 and afterwards only unbinds the textures —
+ * it never disables the units. Vanilla code never touches units above 1, so the leaked
+ * enables on units 2/3/4 (bound to texture 0) flow into GLSM's fixed-function shader
+ * key: every enabled unit is sampled and modulated, texture 0 samples as black, and the
+ * first-person hand and held item render fully black.
  *
- * <p>Snapshots the tracked state on entry and restores it on exit, so the bloom pass
- * cannot leak state into clouds, the first-person hand or the GUI. The first restore
- * logs which fields actually diverged, to identify the leak source.
+ * <p>Snapshots the tracked state of <b>all</b> texture units on entry and restores it on
+ * exit, so the bloom pass cannot leak state into clouds, the first-person hand or the GUI.
+ * The first restore logs which fields actually diverged, to identify the leak source.
  */
 public final class BloomStateGuard {
 
@@ -40,10 +42,10 @@ public final class BloomStateGuard {
         }
         SAVED.framebuffer = GLStateManager.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
         SAVED.activeUnit = GLStateManager.getActiveTextureUnit();
-        SAVED.binding0 = GLStateManager.getBoundTextureForServerState(0);
-        SAVED.binding1 = GLStateManager.getBoundTextureForServerState(1);
-        SAVED.texture0 = textureEnabled(0);
-        SAVED.texture1 = textureEnabled(1);
+        for (int unit = 0; unit < GLStateManager.MAX_TEXTURE_UNITS; unit++) {
+            SAVED.bindings[unit] = GLStateManager.getBoundTextureForServerState(unit);
+            SAVED.textures[unit] = textureEnabled(unit);
+        }
         final BlendStateStack blend = GLStateManager.getBlendState();
         SAVED.blend = blend.isEnabled();
         SAVED.blendSrcRgb = blend.getSrcRgb();
@@ -68,8 +70,9 @@ public final class BloomStateGuard {
         // but force it in case an early return skipped a release.
         GLStateManager.glUseProgram(0);
         GLStateManager.glBindFramebuffer(GL30.GL_FRAMEBUFFER, SAVED.framebuffer);
-        restoreUnit(1, SAVED.binding1, SAVED.texture1);
-        restoreUnit(0, SAVED.binding0, SAVED.texture0);
+        for (int unit = GLStateManager.MAX_TEXTURE_UNITS - 1; unit >= 0; unit--) {
+            restoreUnit(unit, SAVED.bindings[unit], SAVED.textures[unit]);
+        }
         GLStateManager.glActiveTexture(GL13.GL_TEXTURE0 + SAVED.activeUnit);
         if (SAVED.blend) {
             GLStateManager.enableBlend();
@@ -117,10 +120,10 @@ public final class BloomStateGuard {
         final StringBuilder report = new StringBuilder("Bloom pass GL state divergence on first frame:");
         appendDiff(report, "framebuffer", SAVED.framebuffer, GLStateManager.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING));
         appendDiff(report, "activeTextureUnit", SAVED.activeUnit, GLStateManager.getActiveTextureUnit());
-        appendDiff(report, "textureBinding[0]", SAVED.binding0, GLStateManager.getBoundTextureForServerState(0));
-        appendDiff(report, "textureBinding[1]", SAVED.binding1, GLStateManager.getBoundTextureForServerState(1));
-        appendDiff(report, "texture2D[0]", SAVED.texture0, textureEnabled(0));
-        appendDiff(report, "texture2D[1]", SAVED.texture1, textureEnabled(1));
+        for (int unit = 0; unit < GLStateManager.MAX_TEXTURE_UNITS; unit++) {
+            appendDiff(report, "textureBinding[" + unit + "]", SAVED.bindings[unit], GLStateManager.getBoundTextureForServerState(unit));
+            appendDiff(report, "texture2D[" + unit + "]", SAVED.textures[unit], textureEnabled(unit));
+        }
         final BlendStateStack blend = GLStateManager.getBlendState();
         appendDiff(report, "blend", SAVED.blend, blend.isEnabled());
         appendDiff(report, "depthTest", SAVED.depthTest, GLStateManager.getDepthTest().isEnabled());
@@ -138,10 +141,8 @@ public final class BloomStateGuard {
     private static final class Saved {
         int framebuffer;
         int activeUnit;
-        int binding0;
-        int binding1;
-        boolean texture0;
-        boolean texture1;
+        final int[] bindings = new int[GLStateManager.MAX_TEXTURE_UNITS];
+        final boolean[] textures = new boolean[GLStateManager.MAX_TEXTURE_UNITS];
         boolean blend;
         int blendSrcRgb;
         int blendDstRgb;
