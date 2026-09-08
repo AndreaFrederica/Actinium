@@ -7,6 +7,7 @@ import com.dhj.actinium.render.terrain.ActiniumWorldRenderer;
 import com.gtnewhorizons.angelica.compat.mojang.Camera;
 import com.gtnewhorizons.angelica.glsm.GLStateManager;
 import com.gtnewhorizons.angelica.rendering.RenderingState;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import net.coderbot.iris.Iris;
@@ -515,9 +516,13 @@ public abstract class EntityRendererIrisMixin implements IResourceManagerReloadL
         IrisGlDebug.recordWorldPassStage("weather-to-terrain-translucent");
     }
 
+    // GTCEu's GregTechTransformer rewrites renderWorldPass via ASM and replaces the 4th
+    // renderBlockLayer call (TRANSLUCENT) with BloomEffectUtil.renderBloomBlockLayer, so this
+    // ordinal no longer exists under GregTech. Debug-stage marker only; tolerate its absence.
     @Inject(
         method = "renderWorldPass(IFJ)V",
-        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/RenderGlobal;renderBlockLayer(Lnet/minecraft/util/BlockRenderLayer;DILnet/minecraft/entity/Entity;)I", shift = At.Shift.AFTER, ordinal = 3)
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/RenderGlobal;renderBlockLayer(Lnet/minecraft/util/BlockRenderLayer;DILnet/minecraft/entity/Entity;)I", shift = At.Shift.AFTER, ordinal = 3),
+        require = 0
     )
     private void actinium$checkAfterTranslucentTerrain(int pass, float partialTicks, long finishTimeNano, CallbackInfo ci) {
         IrisGlDebug.markStage("render-world-pass:" + pass + ":after-terrain-translucent");
@@ -645,28 +650,37 @@ public abstract class EntityRendererIrisMixin implements IResourceManagerReloadL
         }
     }
 
-    @Redirect(
+    // CubicChunks redirects the same renderDistanceChunks reads for its vertical view distance.
+    // ModifyExpressionValue composes with that @Redirect instead of fighting it: when Actinium
+    // applies first, CubicChunks' value is still clamped by effectiveChunks; when CubicChunks
+    // applies first, no field read remains to wrap and this handler stays inactive (require = 0).
+    @ModifyExpressionValue(
         method = "renderWorldPass(IFJ)V",
-        at = @At(value = "FIELD", target = "Lnet/minecraft/client/settings/GameSettings;renderDistanceChunks:I")
+        at = @At(value = "FIELD", target = "Lnet/minecraft/client/settings/GameSettings;renderDistanceChunks:I"),
+        require = 0
     )
-    private int actinium$alwaysRenderSky(GameSettings settings) {
-        return SkyRenderDistance.effectiveChunks(settings.renderDistanceChunks);
+    private int actinium$alwaysRenderSky(int original) {
+        return SkyRenderDistance.effectiveChunks(original);
     }
 
-    @Redirect(
+    // See actinium$alwaysRenderSky for the CubicChunks coexistence contract.
+    @ModifyExpressionValue(
         method = "setupCameraTransform(FI)V",
-        at = @At(value = "FIELD", target = "Lnet/minecraft/client/settings/GameSettings;renderDistanceChunks:I")
+        at = @At(value = "FIELD", target = "Lnet/minecraft/client/settings/GameSettings;renderDistanceChunks:I"),
+        require = 0
     )
-    private int actinium$alwaysUseSkyRenderDistanceForProjection(GameSettings settings) {
-        return SkyRenderDistance.effectiveChunks(settings.renderDistanceChunks);
+    private int actinium$alwaysUseSkyRenderDistanceForProjection(int original) {
+        return SkyRenderDistance.effectiveChunks(original);
     }
 
-    @Redirect(
+    // See actinium$alwaysRenderSky for the CubicChunks coexistence contract.
+    @ModifyExpressionValue(
         method = "updateFogColor(F)V",
-        at = @At(value = "FIELD", target = "Lnet/minecraft/client/settings/GameSettings;renderDistanceChunks:I")
+        at = @At(value = "FIELD", target = "Lnet/minecraft/client/settings/GameSettings;renderDistanceChunks:I"),
+        require = 0
     )
-    private int actinium$alwaysApplySunsetColors(GameSettings settings) {
-        return SkyRenderDistance.effectiveChunks(settings.renderDistanceChunks);
+    private int actinium$alwaysApplySunsetColors(int original) {
+        return SkyRenderDistance.effectiveChunks(original);
     }
 
     @Redirect(
