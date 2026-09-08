@@ -9,7 +9,7 @@
 
 | 上游 commit | 本地 commit | 内容 |
 |---|---|---|
-| `7190f87d8`+`6169005d8`+`261f9f685` | `1db4945c`+`df7c44ce` | 可选光栅化遮挡剔除：导入 grondag bitraster 引擎与 geometry 包（含许可登记），集成 SectionLattice/OcclusionCuller/Viewport/meshing task 并接选项，默认关闭 |
+| `7190f87d8`+`6169005d8`+`261f9f685` | `1db4945c`+`df7c44ce` | 可选光栅化遮挡剔除：导入 grondag bitraster 引擎与 geometry 包（含许可登记），集成 SectionLattice/OcclusionCuller/Viewport/meshing task 并接选项（后续提交默认开启） |
 | `88a2bfa8c` | `5dae89dd` | 修复模组 directional 纹理（`_e`/`_w`）被误判为 normal/specular 贴图 |
 | `38ee3f207` | `2faa57f4` | **部分收编**：zip filesystem 泄漏（Iris.java）+ DH compat GL 资源泄漏（DHCompatInternal/IrisGenericRenderProgram）；colorspace/ExtendedShader 等 5 文件不适用 |
 | `8398bc281` | `070e7721` | 自适应任务调度器（ChunkBuilder 重写 + ChunkJobMetricsTracker） |
@@ -79,7 +79,7 @@
 ## 遮挡剔除使用与验证
 
 - 选项位置：视频设置（RSO 界面）Performance 页 Rendering Culling 组，
-  "Rasterized Occlusion Culling" tick box，默认关；切换触发 renderer 重建
+  "Rasterized Occlusion Culling" tick box，默认开；切换触发 renderer 重建
   （REQUIRES_RENDERER_RELOAD）。
 - 生效三前提：选项开、`renderChunksMany` 开、主地形 pass 的 vpMatrix 非 null；
   任一不满足即回退旧图遍历路径。
