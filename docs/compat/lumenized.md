@@ -56,11 +56,11 @@
 
 ## 验证记录
 
+- 2026-09-08：手部/所持物品全黑与泛光效果在 GTCEu 与 Lumenized 两条路径下实机验证均正常。
 - 2026-08-28：GTCEu 2.8.10-beta（curse 557242:5519022）+ CubicChunks 共存启动不再崩溃
   （实机确认）；随后发现手部/所持物品全黑。首版 `BloomStateGuard`（仅 0/1 号单元）实机验证
   无效，漂移日志确认守护每帧触发——据此把真因收窄到守护面之外，最终定位为
-  `renderUnreal` 对 2..4 号单元的 TEXTURE_2D 使能泄漏，守护扩为全单元快照/恢复
-  （实机回归待确认，首次日志会输出全单元漂移字段清单）。
+  `renderUnreal` 对 2..4 号单元的 TEXTURE_2D 使能泄漏，守护扩为全单元快照/恢复。
 - 2026-07-20（兼容层实现前手动验证）：默认配置进世界纯色、Esc 可见世界；
   禁用 Lumenized 或 `bloomStyle=0` + `hookDepthTexture=false` 画面正常。
   该记录是旧 safe mode 的依据，safe mode 已被"让 Bloom 真正工作"的兼容层取代。
