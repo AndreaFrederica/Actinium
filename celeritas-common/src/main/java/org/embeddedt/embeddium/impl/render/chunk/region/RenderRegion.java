@@ -44,6 +44,9 @@ public class RenderRegion {
         }
     }
 
+    private static final int MINIMUM_GEOMETRY_ARENA_BYTES = 512 * 1024;
+    private static final int MINIMUM_INDEX_ARENA_BYTES = 64 * 1024;
+
     private final StagingBuffer stagingBuffer;
     private final int x, y, z;
 
@@ -313,7 +316,7 @@ public class RenderRegion {
         private GlTessellation indexedTessellation;
 
         public DeviceResources(CommandList commandList, StagingBuffer stagingBuffer, int stride) {
-            this.geometryArena = new GlBufferArena(commandList, REGION_SIZE * 756, stride, stagingBuffer);
+            this.geometryArena = new GlBufferArena(commandList, stride, MINIMUM_GEOMETRY_ARENA_BYTES, stagingBuffer);
             this.stagingBuffer = stagingBuffer;
             this.stride = stride;
         }
@@ -388,7 +391,7 @@ public class RenderRegion {
 
         public GlBufferArena getOrCreateIndexArena(CommandList commandList) {
             if (this.indexArena == null) {
-                this.indexArena = new GlBufferArena(commandList, (REGION_SIZE * 126) / 4 * 6, 4, this.stagingBuffer);
+                this.indexArena = new GlBufferArena(commandList, 4, MINIMUM_INDEX_ARENA_BYTES, this.stagingBuffer);
             }
             return this.indexArena;
         }
