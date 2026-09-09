@@ -93,6 +93,13 @@ dependencies {
     modCompileOnly 'curse.maven:lumenized-1234162:6734060'
     modCompileOnly "curse.maven:redstoneflux-270789:2920436"
 
+    // CubicChunks 0.0.1301: vertviewdist MixinEntityRenderer @Redirects the same
+    // GameSettings.renderDistanceChunks reads as EntityRendererIrisMixin (startup crash fix)
+    modCompileOnly 'curse.maven:opencubicchunks-292243:3546640'
+    // GTCEu 2.8.10-beta: GregTechTransformer replaces the 4th renderBlockLayer call in
+    // renderWorldPass with BloomEffectUtil.renderBloomBlockLayer (startup crash fix)
+    modCompileOnly 'curse.maven:gregtech-ce-unofficial-557242:5519022'
+
     modRuntimeOnly "curse.maven:celeritas-dynamic-lights-1313831:8387313"
     modRuntimeOnly "curse.maven:celeritas-extra-1451214:8362538"
     modRuntimeOnly "curse.maven:celeritasleafculling-1449111:7550650"

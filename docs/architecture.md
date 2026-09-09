@@ -133,7 +133,9 @@ GTNHLib ← glsm ← celeritas-common ← shader ← 根项目 src/main（compil
 - **`compat/ichunutil/`**：`PortalViewportFactory` / `PortalViewportProvider` /
   `PortalChunkRenderMatrices` / `PortalRenderState` / `WorldBoxVisibility`
   —— 传送门视口与渲染状态管理。
-- **`compat/lumenized/`**：`LumenizedBloomStrategy` —— lumenized bloom 策略适配。
+- **`compat/lumenized/`**：`BloomStateGuard` —— GTCEu/Lumenized bloom 流程前后的 GLSM
+  状态快照/恢复（配 `mixin/mod/lumenized`，同一实现同时覆盖两家内嵌的
+  `gregtech.client` bloom 代码）。
 - **`compat/modernui/`**：`MuiGuiScaleHook` —— ModernUI 界面缩放钩子。
 - **`compat/neofontrender/`**：`NeoFontRenderCompat` —— NeoFontRender 初始化兼容。
 - **`compat/rfp2/`**：空目录（规划占位）。

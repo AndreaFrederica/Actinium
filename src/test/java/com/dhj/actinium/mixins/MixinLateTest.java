@@ -9,26 +9,34 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class MixinLateTest {
     @Test
     void selectsExactConfigsForLoadedMods() {
-        assertEquals(Set.of(), Set.copyOf(MixinLate.configsFor(modId -> false)));
+        assertEquals(Set.of(), Set.copyOf(MixinLate.configsFor(modId -> false, className -> false)));
 
+        // The lumenized config is gated on the embedded bloom class, not on a mod id:
+        // it loads when the class is present even with no matching mod, and stays off
+        // when only the mod id matches but the class is absent.
         assertEquals(
             Set.of("mixins.actinium.lumenized.json"),
-            Set.copyOf(MixinLate.configsFor("lumenized"::equals))
+            Set.copyOf(MixinLate.configsFor(modId -> false, "gregtech.client.utils.BloomEffectUtil"::equals))
+        );
+
+        assertEquals(
+            Set.of(),
+            Set.copyOf(MixinLate.configsFor("lumenized"::equals, className -> false))
         );
 
         assertEquals(
             Set.of("mixins.actinium.betterfoliage.json"),
-            Set.copyOf(MixinLate.configsFor("betterfoliage"::equals))
+            Set.copyOf(MixinLate.configsFor("betterfoliage"::equals, className -> false))
         );
 
         assertEquals(
             Set.of("mixins.actinium.ccl.json"),
-            Set.copyOf(MixinLate.configsFor("codechickenlib"::equals))
+            Set.copyOf(MixinLate.configsFor("codechickenlib"::equals, className -> false))
         );
 
         assertEquals(
             Set.of("mixins.actinium.cofhcore.json"),
-            Set.copyOf(MixinLate.configsFor("cofhcore"::equals))
+            Set.copyOf(MixinLate.configsFor("cofhcore"::equals, className -> false))
         );
 
         assertEquals(
@@ -48,7 +56,7 @@ class MixinLateTest {
                 "mixins.actinium.hbm.json",
                 "mixins.actinium.scannable.json"
             ),
-            Set.copyOf(MixinLate.configsFor(modId -> true))
+            Set.copyOf(MixinLate.configsFor(modId -> true, className -> true))
         );
     }
 }
