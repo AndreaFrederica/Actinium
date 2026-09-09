@@ -10,7 +10,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.concurrent.TimeUnit;
 
 public class ClonedChunkSectionCache {
-    private static final int MAX_CACHE_SIZE = 512; /* number of entries */
+    private static final int MAX_CACHE_SIZE = 2048; /* number of entries */
     private static final long MAX_CACHE_DURATION = TimeUnit.SECONDS.toNanos(5); /* number of nanoseconds */
 
     private final World world;
