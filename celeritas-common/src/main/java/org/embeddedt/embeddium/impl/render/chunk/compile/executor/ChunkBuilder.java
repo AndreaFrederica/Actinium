@@ -37,7 +37,7 @@ public class ChunkBuilder {
     private static final int TASK_QUEUE_LIMIT_PER_WORKER = 2;
 
     /** Keeps the legacy fixed floor available as a local fallback during tuning or regression diagnosis. */
-    private static final boolean ENABLE_ADAPTIVE_SCHEDULING = true;
+    private static final boolean ENABLE_ADAPTIVE_SCHEDULING = false;
 
     /** Enables target-change logging for local tuning. */
     private static final boolean DEBUG_ADAPTIVE_SCHEDULING = false;
