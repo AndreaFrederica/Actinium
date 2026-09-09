@@ -19,8 +19,8 @@ Actinium 以源码形式内嵌了多个大型上游项目。当前仓库能确�
 这些 commit 只能证明代码何时进入 Actinium，不能替代上游 SHA。
 
 Celeritas 上游（https://git.taumc.org/embeddedt/celeritas，stonecutter 分支）的同步基准
-已推进至 `fe57c60fa`（2026-09-07，见 `sync-celeritas-fe57c60fa.md`；此前依次为
-`f15085d4`、`7190f87d8`）。上游镜像仓库在 `D:/Code/celeritas-mirror`。
+已推进至 `5c68ed4cb`（2026-09-08，见 `sync-celeritas-5c68ed4cb.md`；此前依次为
+`f15085d4`、`7190f87d8`、`fe57c60fa`）。上游镜像仓库在 `D:/Code/celeritas-mirror`。
 
 ## 更新流程
 
