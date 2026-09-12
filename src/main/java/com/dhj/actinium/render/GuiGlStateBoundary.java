@@ -13,8 +13,25 @@ import java.nio.ByteBuffer;
  * Defines the fixed-function state owned by GUI render boundaries.
  */
 public final class GuiGlStateBoundary {
+    private static final ThreadLocal<Integer> ENTITY_GUI_DEPTH = ThreadLocal.withInitial(() -> 0);
     private GuiGlStateBoundary() {
     }
+
+    /** Isolates legacy entity rendering performed inside a GUI tooltip. */
+    public static EntitySurfaceState beginEntitySurface() {
+        ENTITY_GUI_DEPTH.set(ENTITY_GUI_DEPTH.get() + 1);
+        return new EntitySurfaceState();
+    }
+
+    public static final class EntitySurfaceState {
+        private EntitySurfaceState() { }
+        public void restore() {
+            int depth = ENTITY_GUI_DEPTH.get() - 1;
+            if (depth <= 0) ENTITY_GUI_DEPTH.remove(); else ENTITY_GUI_DEPTH.set(depth);
+        }
+    }
+
+    public static boolean isEntityGuiSurface() { return ENTITY_GUI_DEPTH.get() > 0; }
 
     /**
      * Restores the neutral state expected when Minecraft starts rendering the HUD.

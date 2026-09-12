@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import com.dhj.actinium.render.GuiGlStateBoundary;
 
 @Mixin(LayerArmorBase.class)
 public class LayerArmorBaseIrisMixin {
@@ -32,6 +33,7 @@ public class LayerArmorBaseIrisMixin {
         EntityEquipmentSlot slot,
         CallbackInfo ci
     ) {
+        if (GuiGlStateBoundary.isEntityGuiSurface()) return;
         ItemIdManager.setItemId(entity.getItemStackFromSlot(slot));
     }
 
@@ -51,6 +53,7 @@ public class LayerArmorBaseIrisMixin {
         EntityEquipmentSlot slot,
         CallbackInfo ci
     ) {
+        if (GuiGlStateBoundary.isEntityGuiSurface()) return;
         ItemIdManager.resetItemId();
     }
 
@@ -71,6 +74,7 @@ public class LayerArmorBaseIrisMixin {
         float scale,
         CallbackInfo ci
     ) {
+        if (GuiGlStateBoundary.isEntityGuiSurface()) return;
         GbufferPrograms.setupSpecialRenderCondition(SpecialCondition.GLINT);
     }
 
@@ -91,6 +95,7 @@ public class LayerArmorBaseIrisMixin {
         float scale,
         CallbackInfo ci
     ) {
+        if (GuiGlStateBoundary.isEntityGuiSurface()) return;
         GbufferPrograms.teardownSpecialRenderCondition();
     }
 }
