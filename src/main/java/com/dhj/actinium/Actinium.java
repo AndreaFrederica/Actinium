@@ -152,7 +152,7 @@ public class Actinium {
                 ClientProxy.animationsMode.next();
             }
         });
-        GLSMPerfDebugHooks.setExtraStatsSupplier(Actinium::dumpExtraPerfStats);
+        GLSMPerfDebugHooks.addStatsProvider(Actinium::dumpExtraPerfStats);
         GLSMPerfDebugHooks.setConfiguredEnabled(
             ActiniumRuntimeOptions.resolvePerfDebugEnabled(ActiniumRuntime.options().debug.enableActiniumPerfDebug)
         );

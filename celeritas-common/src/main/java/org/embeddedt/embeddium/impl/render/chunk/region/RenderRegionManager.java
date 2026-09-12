@@ -2,6 +2,7 @@ package org.embeddedt.embeddium.impl.render.chunk.region;
 
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.*;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebug;
 import org.embeddedt.embeddium.impl.gl.arena.PendingUpload;
 import org.embeddedt.embeddium.impl.gl.arena.staging.FallbackStagingBuffer;
 import org.embeddedt.embeddium.impl.gl.arena.staging.MappedStagingBuffer;
@@ -59,8 +60,13 @@ public class RenderRegionManager {
     }
 
     public void uploadMeshes(CommandList commandList, Collection<ChunkJobResult.Success<? extends ChunkTaskOutput>> results, Runnable graphUpdateTrigger) {
-        for (var entry : this.createMeshUploadQueues(results)) {
-            new MeshUploader(commandList, entry.getKey(), graphUpdateTrigger).processResults(entry.getValue());
+        final long perfStart = GLSMPerfDebug.isEnabled() ? GLSMPerfDebug.begin(GLSMPerfDebug.Stage.CHUNK_UPLOAD) : 0L;
+        try {
+            for (var entry : this.createMeshUploadQueues(results)) {
+                new MeshUploader(commandList, entry.getKey(), graphUpdateTrigger).processResults(entry.getValue());
+            }
+        } finally {
+            GLSMPerfDebug.end(GLSMPerfDebug.Stage.CHUNK_UPLOAD, perfStart);
         }
     }
 

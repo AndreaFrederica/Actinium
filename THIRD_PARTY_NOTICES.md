@@ -16,6 +16,7 @@ for the full license text or legal advice.
 | GTNHLib | https://github.com/GTNewHorizons/GTNHLib | `GTNHLib/` | LGPL-3.0, plus file-level notices | `83ea1b7` |
 | Iris | https://github.com/IrisShaders/Iris | `shader/src/main/java/net/coderbot/iris/`, Iris API/resources, Iris-oriented mixins | LGPL-3.0 | full pipeline import in `79306ba`; resource mappings below |
 | Celeritas renderer | historical Celeritas/Embeddium/Sodium-derived code | `celeritas-common/`, portions of `src/main/java/org/taumc/` and `src/main/java/org/embeddedt/` | mixed upstream provenance; preserve file-level notices and consult source history | present in standalone extraction `6167e49`, split to its current tree in `2835afe` |
+| grondag bitraster | https://git.taumc.org/embeddedt/celeritas (`grondag/bitraster`, Canvas-derived) | `celeritas-common/src/main/java/grondag/bitraster/` | Apache-2.0 (`third-party/licenses/bitraster-APACHE-2.0.txt`); file-level headers preserved | imported with the rasterized occlusion culling port (upstream celeritas `7190f87d8`/`6169005d8`/`261f9f685`) |
 | LWJGL utility code | https://github.com/LWJGL/lwjgl3 | selected `GTNHLib/.../bytebuf/` and GL debug helpers | BSD-style LWJGL license, identified in file headers | imported through GTNHLib/GLSM; service layer work in `4826cf8` |
 | GLSL Transformation Library | https://github.com/GTNewHorizons/glsl-transformation-lib | binary contained dependency | consult the dependency's published license and POM | Maven coordinate `org.taumc:glsl-transformation-lib` |
 
@@ -29,6 +30,10 @@ next bulk upstream refresh.
 - Parts of the renderer retain package names and implementation ideas from Embeddium and Sodium.
 - Several GTNHLib byte-buffer files carry explicit LWJGL copyright and license notices.
 - `MergeSort.java` carries Apache-2.0 and CERN notices in its source header.
+- The occluder-box decomposition sources under
+  `celeritas-common/.../render/chunk/occlusion/geometry/` are Canvas-derived; `Area`,
+  `AreaFinder`, and `BoxFinder` carry GNU LGPL-3.0 notices in their file headers
+  (`OccluderBoxes` has no header upstream).
 - ASM-derived utility code retains its upstream copyright notice.
 - Iris GUI resources are retained under the Iris namespace: upstream
   `common/src/main/resources/assets/iris/textures/gui/widgets.png` maps to

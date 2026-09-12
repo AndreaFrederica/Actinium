@@ -307,7 +307,8 @@ GTNHLib ← glsm ← celeritas-common ← shader ← 根项目 src/main（compil
 - **`compat/`**：`FogHelper`（雾色状态捕获）；`compat/lwjgl/`：`AngelicaCylinder/Disk/
   PartialDisk/Sphere`（替代 LWJGL2 GLU quadric 形状）。
 - **`debug/`**：`GLSMDebug`（详细 draw 日志）、`GLSMPerfDebug` + `GLSMPerfDebugHooks`
-  （周期性能采样）、`GpuCheckpointTracker`（GPU fence 环形检查点）。
+  （周期性能采样；stats provider 列表扩展点允许 celeritas-common 注册调度器/遮挡剔除
+  统计段，主模组注册 fastLit/shadow 段）、`GpuCheckpointTracker`（GPU fence 环形检查点）。
 - **`dsa/`**：`DSAAccess` 接口 + `DSACore/DSAARB/DSAEXT/DSAUnsupported` —— Direct State
   Access 分层实现。
 - **`ffp/`**（固定管线模拟）：`ShaderManager`、`Program`/`ProgramUniformState`、

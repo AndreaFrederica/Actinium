@@ -14,14 +14,15 @@ import org.jetbrains.annotations.Nullable;
  *
  * <p>Bit layout:
  * <pre>
- * 63                 53 52 51       49 48      46 45                0
- * +--------------------+--+-----------+----------+-------------------+
- * |       spare        |IF| pending   | visuals  | visibility graph  |
- * +--------------------+--+-----------+----------+-------------------+
+ * 63                 54 53 52 51       49 48      46 45                0
+ * +--------------------+--+--+-----------+----------+-------------------+
+ * |       spare        |OD|IF| pending   | visuals  | visibility graph  |
+ * +--------------------+--+--+-----------+----------+-------------------+
  * </pre>
  * Bits {@code 0..45} contain the visibility encoding, bits {@code 46..48}
  * contain visual flags, bits {@code 49..51} contain the pending update type,
- * and bit {@code 52} records whether a build is in flight.
+ * bit {@code 52} records whether a build is in flight, and bit {@code 53}
+ * records whether the section's built data has occluder boxes.
  *
  * <p>The visibility graph must be masked with {@link #VISIBILITY_MASK} before
  * it is passed to {@code VisibilityEncoding#getConnections(long)}, because
@@ -50,6 +51,10 @@ public final class PackedSectionMetadata {
     // Bit 52 records that a cancellation token is attached to a build.
     private static final int BUILD_IN_FLIGHT_BIT = 52;
     private static final long BUILD_IN_FLIGHT_FLAG = 1L << BUILD_IN_FLIGHT_BIT;
+
+    // Bit 53 records that the section's built data has occluder boxes.
+    private static final int HAS_OCCLUDER_DATA_BIT = 53;
+    private static final long HAS_OCCLUDER_DATA_FLAG = 1L << HAS_OCCLUDER_DATA_BIT;
 
     /** Returns only the visibility graph portion of the packed metadata. */
     public static long getVisibilityData(long packed) {
@@ -97,6 +102,16 @@ public final class PackedSectionMetadata {
     /** Sets the build-in-flight flag while preserving the other section state. */
     public static long withBuildInFlight(long packed, boolean inFlight) {
         return inFlight ? (packed | BUILD_IN_FLIGHT_FLAG) : (packed & ~BUILD_IN_FLIGHT_FLAG);
+    }
+
+    /** Returns whether the section's built data has occluder boxes. */
+    public static boolean hasOccluderData(long packed) {
+        return (packed & HAS_OCCLUDER_DATA_FLAG) != 0;
+    }
+
+    /** Sets the has-occluder-data flag while preserving the other section state. */
+    public static long withHasOccluderData(long packed, boolean hasOccluderData) {
+        return hasOccluderData ? (packed | HAS_OCCLUDER_DATA_FLAG) : (packed & ~HAS_OCCLUDER_DATA_FLAG);
     }
 
     /*

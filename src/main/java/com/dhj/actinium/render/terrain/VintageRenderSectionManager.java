@@ -65,6 +65,11 @@ public class VintageRenderSectionManager extends RenderSectionManager {
     }
 
     @Override
+    protected boolean useRasterOcclusionCulling() {
+        return ActiniumRuntime.options().performance.useRasterOcclusionCulling;
+    }
+
+    @Override
     protected boolean shouldRespectUpdateTaskQueueSizeLimit() {
         return true;
     }
@@ -134,7 +139,7 @@ public class VintageRenderSectionManager extends RenderSectionManager {
             return null;
         }
 
-        return new ChunkBuilderMeshingTask(render, context, frame, this.cameraPosition);
+        return new ChunkBuilderMeshingTask(render, context, frame, this.cameraPosition, this.useRasterOcclusionCulling());
     }
 
     @Override

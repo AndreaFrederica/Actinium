@@ -3,6 +3,9 @@ package org.embeddedt.embeddium.impl.render.chunk;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.*;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebug;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebugHooks;
+import grondag.bitraster.AbstractRasterizer;
 import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -12,6 +15,7 @@ import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
 import org.embeddedt.embeddium.impl.gl.profiling.TimerQueryManager;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildContext;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
+import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkSortOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkTaskOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.executor.ChunkBuilder;
 import org.embeddedt.embeddium.impl.render.chunk.compile.executor.ChunkJobMetricsTracker;
@@ -28,7 +32,9 @@ import org.embeddedt.embeddium.impl.render.chunk.lists.SectionGraph;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SectionTicker;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SortedRenderLists;
 import org.embeddedt.embeddium.impl.render.chunk.metrics.RenderSectionMetricsTracker;
+import org.embeddedt.embeddium.impl.render.chunk.metrics.RasterPerfStatsDiffer;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
+import org.embeddedt.embeddium.impl.render.chunk.occlusion.RasterOccluder;
 import org.embeddedt.embeddium.impl.render.chunk.region.RenderRegion;
 import org.embeddedt.embeddium.impl.render.chunk.region.RenderRegionManager;
 import org.embeddedt.embeddium.impl.render.chunk.fog.FogService;
@@ -67,6 +73,13 @@ public abstract class RenderSectionManager {
      * update queue empties.
      */
     protected static final boolean CONTINUOUSLY_REMESH_WORLD = false;
+
+    /**
+     * How many frames' worth of dispatch the BFS may collect into the initial-build list. The list only needs to
+     * outlast the interval between graph updates, and an overflow re-marks the graph dirty as soon as results are
+     * uploaded, so a small multiple of the in-flight target is sufficient.
+     */
+    private static final int REBUILD_LIST_FRAMES = 2;
 
     private static final Logger LOGGER = LogManager.getLogger(RenderSectionManager.class);
 
@@ -127,6 +140,14 @@ public abstract class RenderSectionManager {
     @Getter
     protected final RenderSectionMetricsTracker sectionMetricsTracker = new RenderSectionMetricsTracker();
 
+    /**
+     * GLSM perf report extension, kept as a field so {@link #destroy()} can deregister the identical
+     * instance. Registered and invoked on the render thread, matching GLSMPerfDebugHooks' threading contract.
+     */
+    private final Supplier<String> perfStatsProvider = this::dumpPerfStats;
+
+    private final RasterPerfStatsDiffer rasterStatsDiffer = new RasterPerfStatsDiffer();
+
     @Deprecated
     public RenderSectionManager(RenderPassConfiguration<?> configuration, Supplier<ChunkBuildContext> contextSupplier,
                                 BiFunction<RenderDevice, RenderPassConfiguration<?>, ChunkRenderer> chunkRenderer,
@@ -152,7 +173,7 @@ public abstract class RenderSectionManager {
         this.minSection = minSection;
         this.maxSection = maxSection;
         AsyncOcclusionMode asyncMode = this.getAsyncOcclusionMode();
-        this.sectionGraph = new SectionGraph(this.minSection, this.maxSection, asyncMode, hasShadowPass);
+        this.sectionGraph = new SectionGraph(this.minSection, this.maxSection, asyncMode, hasShadowPass, this.useRasterOcclusionCulling());
         this.renderListManager = new RenderListManager(this.sectionGraph, false, asyncMode, this.createSectionTicker());
         if (hasShadowPass) {
             this.shadowRenderListManager = new RenderListManager(this.sectionGraph, true, asyncMode, this.createSectionTicker());
@@ -161,6 +182,8 @@ public abstract class RenderSectionManager {
         }
 
         this.disabledRenderPasses = new ReferenceArraySet<>();
+
+        GLSMPerfDebugHooks.addStatsProvider(this.perfStatsProvider);
     }
 
     protected abstract AsyncOcclusionMode getAsyncOcclusionMode();
@@ -375,13 +398,15 @@ public abstract class RenderSectionManager {
 
     private int getTargetQueueSize() {
         if (this.shouldRespectUpdateTaskQueueSizeLimit()) {
-            return (int) Math.min(Integer.MAX_VALUE, (long) this.builder.getTargetQueueSize() * 10);
+            return (int) Math.min(Integer.MAX_VALUE, (long) this.builder.getTargetQueueSize() * REBUILD_LIST_FRAMES);
         } else {
             return Integer.MAX_VALUE;
         }
     }
 
     protected abstract boolean useFogOcclusion();
+
+    protected abstract boolean useRasterOcclusionCulling();
 
     private float getSearchDistance(@Nullable Matrix4fc projectionMatrix) {
         float distance;
@@ -529,25 +554,29 @@ public abstract class RenderSectionManager {
     }
 
     public void updateChunks(boolean updateImmediately) {
+        final long perfStart = GLSMPerfDebug.isEnabled() ? GLSMPerfDebug.begin(GLSMPerfDebug.Stage.CHUNK_UPDATE_CHUNKS) : 0L;
+        try {
+            this.updateChunks0(updateImmediately);
+        } finally {
+            GLSMPerfDebug.end(GLSMPerfDebug.Stage.CHUNK_UPDATE_CHUNKS, perfStart);
+        }
+    }
+
+    private void updateChunks0(boolean updateImmediately) {
         this.regions.update();
         this.jobMetricsTracker.tick();
 
-        // Advance the adaptive scheduling controller once per frame, before any dispatch reads the budget. This
-        // runs only on the main terrain pass so that an additional shadow pass in the same frame does not
-        // double-tick the controller; both passes share the same worker queue and in-flight target.
-        boolean mainPass = !this.isInShadowPass();
-
-        if (mainPass) {
-            this.builder.tickSchedulingBudget();
+        // Advance the scheduling controller once per frame, before any dispatch reads the budget. This runs only
+        // on the main terrain pass so that an additional shadow pass in the same frame does not double-tick the
+        // controller (which would halve its measured frame time); both passes share the same worker queue and
+        // in-flight target.
+        if (!this.isInShadowPass()) {
+            this.builder.tickSchedulingBudget(this.jobMetricsTracker);
         }
 
         this.promoteInterimRebuildList();
 
         if (!rebuildListHasUpdates()) {
-            // Nothing was dispatched, so the workers cannot have been starved for lack of budget.
-            if (mainPass) {
-                this.builder.setDispatchBudgetLimited(false);
-            }
             if (CONTINUOUSLY_REMESH_WORLD && !this.getCurrentRenderListManager().getRebuildLists().hasAdditionalUpdates()) {
                 this.scheduleRebuildAll();
             }
@@ -560,22 +589,11 @@ public abstract class RenderSectionManager {
         this.submitRebuildTasks(blockingRebuilds, ChunkUpdateType.IMPORTANT_REBUILD);
         this.submitRebuildTasks(blockingRebuilds, ChunkUpdateType.IMPORTANT_SORT);
 
-        // Track whether the deferred dispatch was throttled by the budget while work still
-        // remained. Combined with worker starvation, this is what tells the controller to grow the in-flight
-        // target next frame.
-        boolean budgetLimited = false;
-        budgetLimited |= this.submitRebuildTasks(updateImmediately ? blockingRebuilds : deferredRebuilds, ChunkUpdateType.REBUILD);
-        budgetLimited |= this.submitRebuildTasks(updateImmediately ? blockingRebuilds : deferredRebuilds, ChunkUpdateType.INITIAL_BUILD);
-        // The BFS itself may have discarded candidates that did not fit in the rebuild lists; that is also work
-        // we were unable to dispatch this frame.
-        budgetLimited |= this.getCurrentRenderListManager().getRebuildLists().hasAdditionalUpdates();
-        if (mainPass) {
-            this.builder.setDispatchBudgetLimited(budgetLimited);
-        }
+        this.submitRebuildTasks(updateImmediately ? blockingRebuilds : deferredRebuilds, ChunkUpdateType.REBUILD);
+        this.submitRebuildTasks(updateImmediately ? blockingRebuilds : deferredRebuilds, ChunkUpdateType.INITIAL_BUILD);
 
-        // Count sort tasks as requiring a quarter of the resources of a mesh task
-        long sortBudget = Math.min((long) Integer.MAX_VALUE, (long) this.builder.getSchedulingBudget() * 4L);
-        var deferredSorts = new ChunkJobCollector((int) Math.max(4L, sortBudget), this.buildResults::add);
+        // Sorts fill whatever worker time the mesh dispatch left over, scaled by their measured relative cost
+        var deferredSorts = new ChunkJobCollector(this.builder.getSortSchedulingBudget(), this.buildResults::add);
         this.submitRebuildTasks(updateImmediately ? blockingRebuilds : deferredSorts, ChunkUpdateType.SORT);
 
         blockingRebuilds.awaitCompletion(this.builder);
@@ -734,14 +752,14 @@ public abstract class RenderSectionManager {
         return results;
     }
 
-    /**
-     * {@return true if dispatch stopped because the collector's budget was exhausted while sections still
-     * remained in the queue, i.e. dispatch was budget-limited rather than work-limited for this update type}
-     */
-    private boolean submitRebuildTasks(ChunkJobCollector collector, ChunkUpdateType type) {
+    private void submitRebuildTasks(ChunkJobCollector collector, ChunkUpdateType type) {
         var queue = this.getCurrentRenderListManager().getRebuildLists().byUpdateType().get(type);
 
         int frame = this.getCurrentRenderListManager().getLastUpdatedFrame();
+
+        int cameraX = (int) Math.floor(this.cameraPosition.x);
+        int cameraY = (int) Math.floor(this.cameraPosition.y);
+        int cameraZ = (int) Math.floor(this.cameraPosition.z);
 
         while (!queue.isEmpty() && collector.canOffer()) {
             RenderSection section = queue.remove();
@@ -770,7 +788,10 @@ public abstract class RenderSectionManager {
             }
 
             if (task != null) {
-                var job = this.builder.scheduleTask(task, type.isImportant(), collector::onJobFinished);
+                // Prioritize by distance so sections that only became reachable (and thus schedulable) after their
+                // neighbors were built still run ahead of farther sections that were queued in earlier frames.
+                long priority = (long) section.getSquaredDistanceFromBlockCenter(cameraX, cameraY, cameraZ);
+                var job = this.builder.scheduleTask(task, type.isImportant(), priority, collector::onJobFinished);
                 collector.addSubmittedJob(job);
 
                 section.setBuildCancellationToken(job);
@@ -792,9 +813,6 @@ public abstract class RenderSectionManager {
             }
             section.setPendingUpdate(null);
         }
-
-        // The loop only exits early on !canOffer(), so leftover sections mean we ran out of budget, not work.
-        return !queue.isEmpty();
     }
 
     protected abstract @Nullable ChunkBuilderTask<ChunkBuildOutput> createRebuildTask(RenderSection render, int frame);
@@ -835,6 +853,10 @@ public abstract class RenderSectionManager {
     }
 
     public void destroy() {
+        // destroy() runs on the render thread (SimpleWorldRenderer.unloadWorld performs GL work around it),
+        // the same thread the provider was registered on.
+        GLSMPerfDebugHooks.removeStatsProvider(this.perfStatsProvider);
+
         this.finishAllGraphUpdates();
 
         this.builder.shutdown(); // stop all the workers, and cancel any tasks
@@ -1203,6 +1225,85 @@ public abstract class RenderSectionManager {
 
     public String getTickerDebugString() {
         return this.getCurrentRenderListManager().getTickerDebugString();
+    }
+
+    /**
+     * Extra stats appended to the periodic GLSM perf report. Invoked on the render thread once per report
+     * interval (plus once whenever perf debug toggles, which drains the interval the same way the other
+     * dump-and-reset providers do). Only called while perf debug is enabled, so it does not re-check.
+     */
+    private String dumpPerfStats() {
+        final StringBuilder sb = new StringBuilder(192);
+
+        sb.append("chunk.scheduler[");
+        this.appendJobStats(sb, "build", ChunkBuildOutput.class);
+        sb.append(',');
+        this.appendJobStats(sb, "sort", ChunkSortOutput.class);
+        sb.append(",targetInFlight=").append(this.builder.getTargetQueueSize())
+            .append(",sortsPerMesh=").append(String.format("%.1f", this.builder.getSortsPerMesh()))
+            .append(",frameMs=").append(String.format("%.2f", this.builder.getFrameTimeEmaNanos() / 1_000_000.0))
+            .append(",queued=").append(this.builder.getScheduledJobCount())
+            .append(",busy=").append(this.builder.getBusyThreadCount()).append('/').append(this.builder.getTotalThreadCount());
+        this.appendSlowestSections(sb);
+        sb.append(']');
+
+        if (AbstractRasterizer.STATS) {
+            this.appendRasterStats(sb);
+        }
+
+        return sb.toString();
+    }
+
+    private void appendJobStats(StringBuilder sb, String name, Class<? extends ChunkTaskOutput> outputType) {
+        final double emaNanos = this.jobMetricsTracker.getAverageExecutionNanos(outputType, Double.NaN);
+        final var data = this.jobMetricsTracker.getMetrics().get(outputType);
+        sb.append(name).append("EmaMs=").append(Double.isNaN(emaNanos) ? "n/a" : String.format("%.2f", emaNanos / 1_000_000.0))
+            .append(',').append(name).append("PerSec=").append(data != null ? data.getObservationsInLastTimeInterval() : 0);
+    }
+
+    private void appendSlowestSections(StringBuilder sb) {
+        final var slowest = new ArrayList<>(this.sectionMetricsTracker.getSlowestSections());
+        if (slowest.isEmpty()) {
+            return;
+        }
+        // The tracker's heap iterates in no particular order, so sort here to take the true top 3.
+        slowest.sort(RenderSectionMetricsTracker.BY_BUILD_TIME.reversed());
+        sb.append(",slowest=");
+        for (int i = 0, n = Math.min(3, slowest.size()); i < n; i++) {
+            final RenderSection section = slowest.get(i);
+            if (i > 0) {
+                sb.append(';');
+            }
+            sb.append('(').append(section.getChunkX()).append(',').append(section.getChunkY()).append(',').append(section.getChunkZ())
+                .append(")=").append(String.format("%.2f", section.getLastBuildDurationNanos() / 1_000_000.0)).append("ms");
+        }
+    }
+
+    /**
+     * Raster culling counters only exist when {@code -Dbitraster.stats} is set. The raster counters are
+     * cumulative and written by whichever thread ran the search; the differ turns them into per-interval
+     * rates here on the render thread. Values may be stale by one search while async culling is in flight,
+     * which is acceptable for a diagnostic line.
+     */
+    private void appendRasterStats(StringBuilder sb) {
+        final var diff = this.rasterStatsDiffer.diff(
+                RasterOccluder.STAT_SECTIONS, RasterOccluder.STAT_OCCLUDED_SECTIONS,
+                RasterOccluder.STAT_TEST_NANOS, RasterOccluder.STAT_OCCLUDE_NANOS);
+
+        sb.append(" chunk.raster[testedPerSec=").append(diff.testedSections())
+            .append(",occludedPerSec=").append(diff.occludedSections());
+        final double fraction = diff.occludedFraction();
+        sb.append('(').append(Double.isNaN(fraction) ? "n/a" : String.format("%.1f%%", fraction * 100.0)).append(')');
+        final double testUs = diff.testMicrosPerSection();
+        sb.append(",testAvgUs=").append(Double.isNaN(testUs) ? "n/a" : String.format("%.2f", testUs));
+        final double occludeUs = diff.occludeMicrosPerSection();
+        sb.append(",occludeAvgUs=").append(Double.isNaN(occludeUs) ? "n/a" : String.format("%.2f", occludeUs));
+        final String bufferSize = this.renderListManager.rasterBufferSize();
+        if (bufferSize != null) {
+            sb.append(",buffer=").append(bufferSize);
+        }
+        sb.append(",backtracks=").append(this.renderListManager.rasterBacktrackCount())
+            .append(']');
     }
 
 }

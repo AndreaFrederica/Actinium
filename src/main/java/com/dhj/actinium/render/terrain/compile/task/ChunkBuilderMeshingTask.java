@@ -3,7 +3,6 @@ package com.dhj.actinium.render.terrain.compile.task;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.chunk.VisGraph;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.renderer.tileentity.TileEntitySpecialRenderer;
@@ -12,7 +11,6 @@ import net.minecraft.crash.CrashReportCategory;
 import net.minecraft.init.Blocks;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.EnumBlockRenderType;
-import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ReportedException;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockAccess;
@@ -25,8 +23,7 @@ import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
 import org.embeddedt.embeddium.impl.render.chunk.data.BuiltSectionMeshParts;
 import org.embeddedt.embeddium.impl.render.chunk.data.MinecraftBuiltRenderSectionData;
-import org.embeddedt.embeddium.impl.render.chunk.occlusion.GraphDirection;
-import org.embeddedt.embeddium.impl.render.chunk.occlusion.VisibilityEncoding;
+import org.embeddedt.embeddium.impl.render.chunk.occlusion.SectionVisibilityBuilder;
 import org.embeddedt.embeddium.impl.render.chunk.terrain.TerrainRenderPass;
 import org.embeddedt.embeddium.impl.util.task.CancellationToken;
 import org.joml.Vector3d;
@@ -50,19 +47,21 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
     private final int buildTime;
     private final Vector3d camera;
     private final ChunkRenderContext renderContext;
+    private final boolean rasterOcclusion;
 
-    public ChunkBuilderMeshingTask(RenderSection render, ChunkRenderContext context, int time, Vector3d camera) {
+    public ChunkBuilderMeshingTask(RenderSection render, ChunkRenderContext context, int time, Vector3d camera, boolean rasterOcclusion) {
         this.render = render;
         this.buildTime = time;
         this.camera = camera;
         this.renderContext = context;
+        this.rasterOcclusion = rasterOcclusion;
     }
 
     @Override
     public ChunkBuildOutput execute(ChunkBuildContext context, CancellationToken cancellationToken) {
         VintageChunkBuildContext buildContext = (VintageChunkBuildContext)context;
         MinecraftBuiltRenderSectionData<TextureAtlasSprite, TileEntity> renderData = new MinecraftBuiltRenderSectionData<>();
-        VisGraph occluder = new VisGraph();
+        SectionVisibilityBuilder occluder = new SectionVisibilityBuilder();
 
         ChunkBuildBuffers buffers = buildContext.buffers;
         buffers.init(renderData, this.render.getSectionIndex());
@@ -104,6 +103,10 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
                         if (block == Blocks.AIR) {
                             continue;
+                        }
+
+                        if (this.rasterOcclusion) {
+                            occluder.markRenderable(x, y, z);
                         }
 
                         if (block.hasTileEntity(blockState)) {
@@ -164,7 +167,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                         }
 
                         if (blockState.isOpaqueCube()) {
-                            occluder.setOpaqueCube(blockPos);
+                            occluder.markOpaque(x, y, z);
                         }
                     }
                 }
@@ -185,7 +188,10 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
             renderData.hasBlockGeometry = true;
         }
 
-        encodeVisibilityData(occluder, renderData);
+        if (this.rasterOcclusion) {
+            renderData.occluderBoxes = occluder.computeOccluderBoxes();
+        }
+        renderData.visibilityData = occluder.computeVisibilityEncoding();
 
         return new ChunkBuildOutput(this.render, renderData, meshes, this.buildTime);
     }
@@ -202,22 +208,6 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         crashReportSection.addCrashSection("Chunk section", this.render);
 
         return new ReportedException(report);
-    }
-
-    private static final EnumFacing[] FACINGS = new EnumFacing[GraphDirection.COUNT];
-
-    static {
-        FACINGS[GraphDirection.UP] = EnumFacing.UP;
-        FACINGS[GraphDirection.DOWN] = EnumFacing.DOWN;
-        FACINGS[GraphDirection.WEST] = EnumFacing.WEST;
-        FACINGS[GraphDirection.EAST] = EnumFacing.EAST;
-        FACINGS[GraphDirection.NORTH] = EnumFacing.NORTH;
-        FACINGS[GraphDirection.SOUTH] = EnumFacing.SOUTH;
-    }
-
-    private static void encodeVisibilityData(VisGraph occluder, MinecraftBuiltRenderSectionData<TextureAtlasSprite, TileEntity> renderData) {
-        var data = occluder.computeVisibility();
-        renderData.visibilityData = VisibilityEncoding.encode((from, to) -> data.isVisible(FACINGS[from], FACINGS[to]));
     }
 
 }

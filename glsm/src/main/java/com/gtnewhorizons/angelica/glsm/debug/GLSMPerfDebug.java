@@ -37,7 +37,10 @@ public final class GLSMPerfDebug {
         BUFFERBUILDER_STREAM_DRAW("bufferbuilder.streamDraw"),
         BUFFERBUILDER_PERSISTENT_UPLOAD("bufferbuilder.persistentUpload"),
         BUFFERBUILDER_ORPHAN_UPLOAD("bufferbuilder.orphanUpload"),
-        BUFFERBUILDER_DRAW_CALL("bufferbuilder.drawCall");
+        BUFFERBUILDER_DRAW_CALL("bufferbuilder.drawCall"),
+        CHUNK_UPLOAD("chunk.upload"),
+        CHUNK_UPDATE_CHUNKS("chunk.updateChunks", true),
+        CHUNK_OCCLUSION_SEARCH("chunk.occlusionSearch", true);
 
         private final String label;
         private final boolean alwaysSample;

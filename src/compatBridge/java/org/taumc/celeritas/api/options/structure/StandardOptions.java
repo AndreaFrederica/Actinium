@@ -73,6 +73,7 @@ public final class StandardOptions {
         public static final OptionIdentifier<Void> RENDER_PASS_CONSOLIDATION = OptionIdentifier.create(EMBEDDIUM_MOD_ID, "render_pass_consolidation");
         public static final OptionIdentifier<Void> USE_FASTER_CLOUDS = OptionIdentifier.create(EMBEDDIUM_MOD_ID, "use_faster_clouds");
         public static final OptionIdentifier<Void> ASYNC_GRAPH_SEARCH = OptionIdentifier.create(EMBEDDIUM_MOD_ID, "async_graph_search");
+        public static final OptionIdentifier<Void> RASTER_OCCLUSION_CULLING = OptionIdentifier.create(EMBEDDIUM_MOD_ID, "raster_occlusion_culling");
         public static final OptionIdentifier<Void> CHUNK_FADE_IN_DURATION = OptionIdentifier.create(EMBEDDIUM_MOD_ID, "chunk_fade_in_duration");
 
         public static final OptionIdentifier<Void> FULLSCREEN_MODE = OptionIdentifier.create(ACTINIUM_MOD_ID, "fullscreen_mode");
