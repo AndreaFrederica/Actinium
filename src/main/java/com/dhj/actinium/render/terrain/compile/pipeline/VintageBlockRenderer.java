@@ -185,7 +185,7 @@ public class VintageBlockRenderer {
             }
 
             this.currentQuadRenderingFlags = this.analyzer.getFlagsForRendering(VintageDiffuseProvider.fromEnumFacing(dir), BakedQuadView.ofList(quads));
-            renderQuadList(buffer, buffers, material, pos, dir, lighter, colorProvider, offset, quads);
+            renderQuadListInternal(buffer, buffers, material, pos, dir, lighter, colorProvider, offset, quads);
         }
 
         var quads = model.getQuads(state, null, rand);
@@ -195,7 +195,7 @@ public class VintageBlockRenderer {
                     state, pos, blockAccess, layer, null, quads);
             if (!quads.isEmpty()) {
                 this.currentQuadRenderingFlags = this.analyzer.getFlagsForRendering(ModelQuadFacing.UNASSIGNED, BakedQuadView.ofList(quads));
-                renderQuadList(buffer, buffers, material, pos, null, lighter, colorProvider, offset, quads);
+                renderQuadListInternal(buffer, buffers, material, pos, null, lighter, colorProvider, offset, quads);
             }
         }
 
@@ -230,10 +230,17 @@ public class VintageBlockRenderer {
         return vertexColors;
     }
 
-    private void renderQuadList(ChunkModelBuilder defaultBuffer, ChunkBuildBuffers buffers,
-                                Material material, BlockPos pos, EnumFacing cullFace,
-                                LightPipeline lighter, IBlockColor colorProvider, Vec3d offset,
-                                List<BakedQuad> quads) {
+    /**
+     * Emits one quad list through the light pipeline and chunk encoders. The compat bridge reaches
+     * this through the {@code actiniumLegacy$renderQuadList} invoker, which dispatches by name and
+     * descriptor: this method must therefore stay private and must never be renamed back to
+     * {@code renderQuadList}, or the invoker could dispatch into the bridge renderer's delegating
+     * method of the same name and recurse until a {@link StackOverflowError} (#138).
+     */
+    private void renderQuadListInternal(ChunkModelBuilder defaultBuffer, ChunkBuildBuffers buffers,
+                                        Material material, BlockPos pos, EnumFacing cullFace,
+                                        LightPipeline lighter, IBlockColor colorProvider, Vec3d offset,
+                                        List<BakedQuad> quads) {
         int localX = pos.getX() & 15, localY = pos.getY() & 15, localZ = pos.getZ() & 15;
         var config = buffers.getRenderPassConfiguration();
         //noinspection ForLoopReplaceableByForEach

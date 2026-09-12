@@ -140,6 +140,12 @@ public class VintageBlockRenderer extends ActiniumVintageBlockRenderer {
         access.actiniumLegacy$setCurrentRenderLayer(null);
     }
 
+    /**
+     * Legacy self-call facade retained for addon @Shadow/@Redirect bindings. Delegates to the main
+     * renderer's deliberately renamed {@code renderQuadListInternal}: the invoker dispatches by
+     * name, so this facade must never share its target's name, and both must stay private, or the
+     * invoker could dispatch back into this method and recurse (#138).
+     */
     private void renderQuadList(ChunkModelBuilder defaultBuffer, ChunkBuildBuffers buffers, Material material,
                                 BlockPos pos, EnumFacing cullFace, LightPipeline lighter,
                                 IBlockColor colorProvider, Vec3d offset, List<BakedQuad> quads) {

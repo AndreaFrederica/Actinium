@@ -109,7 +109,7 @@ public abstract class LegacyRendererAccessMixin implements LegacyRendererAccess 
     public abstract int actiniumLegacy$resolveShaderBlockId(IBlockState state, BlockPos pos);
 
     @Override
-    @Invoker("renderQuadList")
+    @Invoker("renderQuadListInternal")
     public abstract void actiniumLegacy$renderQuadList(ChunkModelBuilder defaultBuffer, ChunkBuildBuffers buffers,
                                                        Material material, BlockPos pos, EnumFacing cullFace,
                                                        LightPipeline lighter, IBlockColor colorProvider, Vec3d offset,
