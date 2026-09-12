@@ -6436,6 +6436,42 @@ public class GLStateManager {
         RENDER_BACKEND.uniform4iv(location, values);
     }
 
+    // ARB_shader_objects buffer forms: the GL redirector rewrites ARBShaderObjects
+    // glUniform{1..4}ARB calls to these same-named methods while preserving the caller's
+    // descriptor, so every FloatBuffer/IntBuffer overload must exist here or the call
+    // fails with NoSuchMethodError (Dynamic Surroundings aurora shader, issue #137).
+    public static void glUniform1ARB(int location, FloatBuffer values) {
+        glUniform1(location, values);
+    }
+
+    public static void glUniform1ARB(int location, IntBuffer values) {
+        glUniform1(location, values);
+    }
+
+    public static void glUniform2ARB(int location, FloatBuffer values) {
+        glUniform2(location, values);
+    }
+
+    public static void glUniform2ARB(int location, IntBuffer values) {
+        glUniform2(location, values);
+    }
+
+    public static void glUniform3ARB(int location, FloatBuffer values) {
+        glUniform3(location, values);
+    }
+
+    public static void glUniform3ARB(int location, IntBuffer values) {
+        glUniform3(location, values);
+    }
+
+    public static void glUniform4ARB(int location, FloatBuffer values) {
+        glUniform4(location, values);
+    }
+
+    public static void glUniform4ARB(int location, IntBuffer values) {
+        glUniform4(location, values);
+    }
+
     public static void glUniformMatrix2(int location, boolean transpose, FloatBuffer matrices) {
         RENDER_BACKEND.uniformMatrix2(location, transpose, matrices);
     }
