@@ -543,6 +543,16 @@ public class Iris {
                 shaderPackPath = optionalPath.get();
             } else {
                 logger.error("Could not load the shaderpack \"{}\" because it appears to lack a \"shaders\" directory", name);
+
+                if (zipFileSystem != null) {
+                    try {
+                        zipFileSystem.close();
+                    } catch (IOException e) {
+                        logger.error("Failed to close zip file system?", e);
+                    }
+                    zipFileSystem = null;
+                }
+
                 return false;
             }
         } else {

@@ -2,7 +2,9 @@ package com.gtnewhorizons.angelica.glsm.redirect;
 
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 import java.io.IOException;
@@ -86,22 +88,74 @@ class GLStateManagerRedirectContractTest {
         );
     }
 
-    private static Set<String> methodDescriptors(String methodName) throws IOException {
-        ClassNode classNode = new ClassNode();
-        try (InputStream in = GLStateManagerRedirectContractTest.class.getClassLoader()
-            .getResourceAsStream(GL_STATE_MANAGER_FILE)) {
-            if (in == null) {
-                throw new IOException("Could not find " + GL_STATE_MANAGER_FILE + " on the test classpath");
-            }
-            new ClassReader(in).accept(classNode, 0);
+    @Test
+    void colorMatrixGetterExists() throws IOException {
+        assertTrue(
+            methodDescriptors("getColorMatrix").contains("()Lorg/joml/Matrix4fStack;"),
+            "GLStateManager must expose getColorMatrix() for GL_COLOR matrix operations"
+        );
+    }
+
+    @Test
+    void colorMatrixModeIsRoutedToTrackedColorStack() throws IOException {
+        assertTrue(
+            methodReferencesField("getMatrixStack", "colorMatrix"),
+            "GLStateManager.getMatrixStack() must route GL11.GL_COLOR mode to the tracked colorMatrix "
+                + "stack (issue #134): without it Minecraft.resetGlStates() dies with "
+                + "IllegalStateException: Unknown matrix mode: 6144"
+        );
+        assertTrue(
+            methodReferencesField("bumpMatrixGeneration", "colorMatrixGeneration"),
+            "GLStateManager.bumpMatrixGeneration() must bump colorMatrixGeneration for GL_COLOR mode "
+                + "so color-matrix edits invalidate cached state like the other matrix stacks"
+        );
+    }
+
+    @Test
+    void arbUniformBufferFormsExist() throws IOException {
+        for (String name : new String[] {"glUniform1ARB", "glUniform2ARB", "glUniform3ARB", "glUniform4ARB"}) {
+            Set<String> descriptors = methodDescriptors(name);
+            assertTrue(
+                descriptors.contains("(ILjava/nio/FloatBuffer;)V"),
+                "GLStateManager must expose " + name + "(int, FloatBuffer): the GL redirector rewrites "
+                    + "ARBShaderObjects." + name + " calls to it while preserving the descriptor, and a missing "
+                    + "overload crashes the caller with NoSuchMethodError (Dynamic Surroundings aurora shader, "
+                    + "issue #137)"
+            );
+            assertTrue(
+                descriptors.contains("(ILjava/nio/IntBuffer;)V"),
+                "GLStateManager must expose " + name + "(int, IntBuffer) to cover every descriptor the "
+                    + "redirector can produce for ARBShaderObjects." + name
+            );
         }
-        return classNode.methods.stream()
+    }
+
+    private static Set<String> methodDescriptors(String methodName) throws IOException {
+        return loadClassNode().methods.stream()
             .filter(method -> method.name.equals(methodName))
             .map(method -> method.desc)
             .collect(Collectors.toSet());
     }
 
     private static Set<String> glGetActiveUniformDescriptors() throws IOException {
+        return methodDescriptors("glGetActiveUniform");
+    }
+
+    private static boolean methodReferencesField(String methodName, String fieldName) throws IOException {
+        for (MethodNode method : loadClassNode().methods) {
+            if (!method.name.equals(methodName)) {
+                continue;
+            }
+            for (AbstractInsnNode instruction : method.instructions) {
+                if (instruction instanceof FieldInsnNode fieldAccess && fieldAccess.name.equals(fieldName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static ClassNode loadClassNode() throws IOException {
         ClassNode classNode = new ClassNode();
         try (InputStream in = GLStateManagerRedirectContractTest.class.getClassLoader()
             .getResourceAsStream(GL_STATE_MANAGER_FILE)) {
@@ -110,9 +164,6 @@ class GLStateManagerRedirectContractTest {
             }
             new ClassReader(in).accept(classNode, 0);
         }
-        return classNode.methods.stream()
-            .filter(method -> method.name.equals("glGetActiveUniform"))
-            .map(method -> method.desc)
-            .collect(Collectors.toSet());
+        return classNode;
     }
 }

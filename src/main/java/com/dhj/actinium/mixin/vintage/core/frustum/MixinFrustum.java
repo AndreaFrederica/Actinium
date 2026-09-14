@@ -27,8 +27,9 @@ public class MixinFrustum implements ViewportProvider {
 
     @Override
     public Viewport sodium$createViewport() {
-        var frustum = ((IClippingHelper)clippingHelper).celeritas$getJomlFrustum();
-        return new Viewport(frustum::testAab, new org.joml.Vector3d(this.x, this.y, this.z).add(CameraHelper.getThirdPersonOffset()));
+        var helper = (IClippingHelper) clippingHelper;
+        var frustum = helper.celeritas$getJomlFrustum();
+        return new Viewport(frustum::testAab, new org.joml.Vector3d(this.x, this.y, this.z).add(CameraHelper.getThirdPersonOffset()), helper.celeritas$getVpMatrix());
     }
 }
 

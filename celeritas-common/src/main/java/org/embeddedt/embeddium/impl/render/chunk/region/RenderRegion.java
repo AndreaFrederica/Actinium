@@ -44,6 +44,9 @@ public class RenderRegion {
         }
     }
 
+    private static final int MINIMUM_GEOMETRY_ARENA_BYTES = 512 * 1024;
+    private static final int MINIMUM_INDEX_ARENA_BYTES = 64 * 1024;
+
     private final StagingBuffer stagingBuffer;
     private final int x, y, z;
 
@@ -68,6 +71,14 @@ public class RenderRegion {
      */
     @Getter
     private int passSetUpdateCount = 0;
+
+    /**
+     * Incremented each time the built data of any section in this region changes, or a section is added to or
+     * removed from the region. Consumers that derive per-region state from section data can compare this against a
+     * cached value to skip recomputation.
+     */
+    @Getter
+    private int dataRevision = 0;
 
     RenderRegion(int x, int y, int z, int id, StagingBuffer stagingBuffer) {
         this.x = x;
@@ -134,6 +145,10 @@ public class RenderRegion {
 
     public boolean isEmpty() {
         return this.sectionCount == 0;
+    }
+
+    public void onSectionDataChanged() {
+        this.dataRevision++;
     }
 
     public SectionRenderDataStorage getStorage(TerrainRenderPass pass) {
@@ -207,6 +222,7 @@ public class RenderRegion {
         this.sections[sectionIndex] = section;
         this.sectionLoadTimes[sectionIndex] = 0;
         this.sectionCount++;
+        this.dataRevision++;
     }
 
     public void removeSection(RenderSection section) {
@@ -226,6 +242,7 @@ public class RenderRegion {
         this.sections[sectionIndex] = null;
         this.sectionLoadTimes[sectionIndex] = 0;
         this.sectionCount--;
+        this.dataRevision++;
     }
 
     public void updateSectionLoadTime(RenderSection section) {
@@ -299,7 +316,7 @@ public class RenderRegion {
         private GlTessellation indexedTessellation;
 
         public DeviceResources(CommandList commandList, StagingBuffer stagingBuffer, int stride) {
-            this.geometryArena = new GlBufferArena(commandList, REGION_SIZE * 756, stride, stagingBuffer);
+            this.geometryArena = new GlBufferArena(commandList, stride, MINIMUM_GEOMETRY_ARENA_BYTES, stagingBuffer);
             this.stagingBuffer = stagingBuffer;
             this.stride = stride;
         }
@@ -374,7 +391,7 @@ public class RenderRegion {
 
         public GlBufferArena getOrCreateIndexArena(CommandList commandList) {
             if (this.indexArena == null) {
-                this.indexArena = new GlBufferArena(commandList, (REGION_SIZE * 126) / 4 * 6, 4, this.stagingBuffer);
+                this.indexArena = new GlBufferArena(commandList, 4, MINIMUM_INDEX_ARENA_BYTES, this.stagingBuffer);
             }
             return this.indexArena;
         }

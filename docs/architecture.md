@@ -101,7 +101,8 @@ GTNHLib ← glsm ← celeritas-common ← shader ← 根项目 src/main（compil
   - `mixin/features/iris`（含 `startup/`）：约 35 个 Iris 兼容注入
     （实体、粒子、渲染器、纹理地图接入与启动期纹理注入）。
   - `mixin/mod/`：按模组分组的 conditional 注入 —— `betterfoliage`、`ccl`、`dh`（7 个）、
-    `gibbed`、`hbm`（2 类，机器状态与世界光照兼容）、`ichunutil`、`lumenized`、`revoui`、
+    `gibbed`、`hbm`（2 类，机器状态与世界光照兼容）、`ichunutil`、`littletiles`（2 类，
+    TE 顶点缓存接入区块网格）、`lumenized`、`revoui`、
     `voxelmap`（3 类，小地图兼容）；
     `stellarcore` 为空目录（规划占位）。
   - `mixin/vintage/`：原版 1.12.2 注入分支 —— `core`（Minecraft/RenderGlobal/Tessellator/
@@ -307,7 +308,8 @@ GTNHLib ← glsm ← celeritas-common ← shader ← 根项目 src/main（compil
 - **`compat/`**：`FogHelper`（雾色状态捕获）；`compat/lwjgl/`：`AngelicaCylinder/Disk/
   PartialDisk/Sphere`（替代 LWJGL2 GLU quadric 形状）。
 - **`debug/`**：`GLSMDebug`（详细 draw 日志）、`GLSMPerfDebug` + `GLSMPerfDebugHooks`
-  （周期性能采样）、`GpuCheckpointTracker`（GPU fence 环形检查点）。
+  （周期性能采样；stats provider 列表扩展点允许 celeritas-common 注册调度器/遮挡剔除
+  统计段，主模组注册 fastLit/shadow 段）、`GpuCheckpointTracker`（GPU fence 环形检查点）。
 - **`dsa/`**：`DSAAccess` 接口 + `DSACore/DSAARB/DSAEXT/DSAUnsupported` —— Direct State
   Access 分层实现。
 - **`ffp/`**（固定管线模拟）：`ShaderManager`、`Program`/`ProgramUniformState`、
@@ -450,6 +452,7 @@ LWJGL 后端（并入本子项目）：
 | `mixins.actinium.betterfoliage.json` | late/conditional（betterfoliage） | `MixinChunkBuilderMeshingTaskBetterFoliage` |
 | `mixins.actinium.ccl.json` | late/conditional（codechickenlib） | `MixinGlStateTracker` |
 | `mixins.actinium.hbm.json` | late/conditional（hbm） | `MixinRenderUtil`、`MixinTileEntityRendererDispatcherLightmap` |
+| `mixins.actinium.littletiles.json` | late/conditional（littletiles） | `MixinChunkBuilderMeshingTaskLittleTiles`、`MixinTileEntityRenderManager`（TE 顶点缓存注入 section 网格 + 缓存构建完成触发 section 重建） |
 | `mixins.actinium.voxelmap.json` | late/conditional（voxelmap） | `mixin/mod/voxelmap` 3 类（GLUtils/GLShim/renderMap，小地图 CPU 路径与 HudCaching alpha 保护） |
 
 门控映射在 `mixins.actinium.conditions.properties`（mixin loader 不认 json 自定义字段），

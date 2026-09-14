@@ -1,6 +1,7 @@
 package org.embeddedt.embeddium.impl.render.chunk.lists;
 
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import com.gtnewhorizons.angelica.glsm.debug.GLSMPerfDebug;
 import lombok.Getter;
 import lombok.Setter;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
@@ -108,7 +109,7 @@ public class RenderListManager {
 
         this.lattice.ensureWindowCovers(viewport.getChunkCoord(), searchDistance);
 
-        this.submitSearch(frame, regionIdsLength, targetQueueSize, visitor ->
+        this.submitSearch(frame, regionIdsLength, targetQueueSize, viewport, visitor ->
                 this.lattice.findVisible(visitor, viewport, searchDistance, regionIdsLength, useOcclusionCulling, true, frame));
     }
 
@@ -125,20 +126,23 @@ public class RenderListManager {
 
         this.lattice.ensureWindowCovers(shadowViewport.getChunkCoord(), searchDistance);
 
-        this.submitSearch(frame, regionIdsLength, targetQueueSize, visitor ->
+        this.submitSearch(frame, regionIdsLength, targetQueueSize, shadowViewport, visitor ->
                 this.lattice.findShadowVisible(visitor, shadowViewport, searchDistance, regionIdsLength, lightVector, frame));
     }
 
-    private void submitSearch(int frame, int regionIdsLength, int targetQueueSize,
+    private void submitSearch(int frame, int regionIdsLength, int targetQueueSize, Viewport viewport,
                               Function<VisibleChunkCollector, SectionLattice.VisibilitySnapshot> search) {
         if (this.currentOcclusionFuture != null) {
             throw new IllegalStateException("Occlusion work in progress while trying to submit next task");
         }
 
-        var visitor = new VisibleChunkCollector(this.lattice, frame, regionIdsLength, targetQueueSize);
+        var visitor = new VisibleChunkCollector(this.lattice, frame, regionIdsLength, targetQueueSize, viewport.getBlockCoord());
 
         Supplier<VisibleChunkCollector> occlusionTask = () -> {
             this.pendingVisibilitySnapshot = search.apply(visitor);
+
+            // Sort the rebuild lists here rather than on the render thread when the result is joined
+            visitor.finishRebuildLists();
 
             // WARNING: when async, this runs on the search thread.
             // SectionTicker.onRenderListUpdated() must be safe to call off the render thread.
@@ -162,6 +166,14 @@ public class RenderListManager {
     public void finishPreviousGraphUpdate() {
         if (currentOcclusionFuture != null) {
             VisibleChunkCollector visitor = currentOcclusionFuture.join();
+
+            // The join establishes happens-before with the search thread, so the timing the search recorded
+            // into the culler is visible here. Consume it on the render thread: GLSMPerfDebug's counters are
+            // single-threaded and must never be written from the search thread.
+            final long[] searchTiming = this.lattice.pollLastSearchTiming();
+            if (searchTiming != null) {
+                GLSMPerfDebug.record(GLSMPerfDebug.Stage.CHUNK_OCCLUSION_SEARCH, searchTiming[0], searchTiming[1]);
+            }
 
             this.renderLists = visitor.createRenderLists();
             this.rebuildLists = visitor.getRebuildLists();
@@ -216,6 +228,15 @@ public class RenderListManager {
             return "";
         }
         return this.sectionTicker.getDebugString();
+    }
+
+    /** Current raster buffer size as {@code width x height} in pixels, or null when raster culling is off. */
+    public @Nullable String rasterBufferSize() {
+        return this.lattice.rasterBufferSize();
+    }
+
+    public int rasterBacktrackCount() {
+        return this.lattice.rasterBacktrackCount();
     }
 
     private RenderListDebugStatistics computeDebugStatistics() {

@@ -24,12 +24,13 @@ class VisibleChunkCollectorSchedulingTest {
         SectionLattice lattice = createLattice();
         RenderSection first = attach(lattice, region, 0, 0, 0, ChunkUpdateType.INITIAL_BUILD);
         RenderSection second = attach(lattice, region, 1, 0, 0, ChunkUpdateType.INITIAL_BUILD);
-        VisibleChunkCollector collector = new VisibleChunkCollector(lattice, 0, 1, 1);
+        VisibleChunkCollector collector = new VisibleChunkCollector(lattice, 0, 1, 1, new Vector3i(8, 8, 8));
         VisibilitySnapshot window = captureWindow(lattice);
 
         visit(collector, window, first);
         visit(collector, window, second);
 
+        collector.finishRebuildLists();
         var rebuildLists = collector.getRebuildLists();
 
         assertEquals(1, rebuildLists.byUpdateType().get(ChunkUpdateType.INITIAL_BUILD).size());
@@ -43,12 +44,13 @@ class VisibleChunkCollectorSchedulingTest {
         SectionLattice lattice = createLattice();
         RenderSection first = attach(lattice, region, 0, 0, 0, ChunkUpdateType.REBUILD);
         RenderSection second = attach(lattice, region, 1, 0, 0, ChunkUpdateType.REBUILD);
-        VisibleChunkCollector collector = new VisibleChunkCollector(lattice, 0, 1, 0);
+        VisibleChunkCollector collector = new VisibleChunkCollector(lattice, 0, 1, 0, new Vector3i(8, 8, 8));
         VisibilitySnapshot window = captureWindow(lattice);
 
         visit(collector, window, first);
         visit(collector, window, second);
 
+        collector.finishRebuildLists();
         var rebuildLists = collector.getRebuildLists();
 
         assertEquals(2, rebuildLists.byUpdateType().get(ChunkUpdateType.REBUILD).size());
@@ -74,7 +76,7 @@ class VisibleChunkCollectorSchedulingTest {
     }
 
     private static SectionLattice createLattice() {
-        SectionLattice lattice = new SectionLattice(0, 1, false);
+        SectionLattice lattice = new SectionLattice(0, 1, false, false);
         lattice.ensureWindowCovers(new Vector3i(0, 0, 0), 0.0F);
         return lattice;
     }
@@ -96,7 +98,7 @@ class VisibleChunkCollectorSchedulingTest {
                 new Vector3d(8.0, 8.0, 8.0)
         );
 
-        return lattice.findVisible((latticeIndex, regionId, sectionIndex, compactMeta, visible) -> {
+        return lattice.findVisible((latticeIndex, regionId, sectionIndex, chunkX, chunkY, chunkZ, compactMeta, visible) -> {
         }, viewport, 0.0F, 1, true, true, 0);
     }
 
@@ -104,7 +106,8 @@ class VisibleChunkCollectorSchedulingTest {
         int latticeIndex = latticeIndex(window, section);
         int compactMeta = PackedSectionMetadata.toCompactMeta(section.getPackedMetadata());
 
-        collector.visit(latticeIndex, section.getRegion().getId(), section.getSectionIndex(), compactMeta, true);
+        collector.visit(latticeIndex, section.getRegion().getId(), section.getSectionIndex(),
+                section.getChunkX(), section.getChunkY(), section.getChunkZ(), compactMeta, true);
     }
 
     private static int latticeIndex(VisibilitySnapshot window, RenderSection section) {

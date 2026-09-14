@@ -438,7 +438,9 @@ generation，避免以主 context 可能已过期的缓存状态作为 uniform �
 
 `D:\Code\Actinium\glsm\src\main\java\com\gtnewhorizons\angelica\glsm\debug\GLSMPerfDebug.java`
 
-通过 `-Dactinium.glsmPerfDebug=true` 启用。跟踪 20+ 个 stage（stream draw、FFP uniforms、buffer upload、fence 操作等），每秒自动报告。
+通过 `-Dactinium.glsmPerfDebug=true`（或 "Render Timing Debug" 选项 / `-Dactinium.perfDebug`）启用。跟踪 20+ 个 stage（stream draw、FFP uniforms、buffer upload、fence 操作、chunk upload/updateChunks/occlusionSearch 等），每秒自动报告。
+
+统计段走 provider 列表扩展（`GLSMPerfDebugHooks.addStatsProvider`）：主模组注册 fastLitItemDisplayLists/adaptiveShadowBounds；`RenderSectionManager` 注册 `chunk.scheduler`（每任务类型 EMA 耗时/每秒完成数/targetInFlight/queue/busy/top-3 慢 section），`-Dbitraster.stats=true` 时追加 `chunk.raster`（每秒 tested/occluded、耗时均值、缓冲规模）。
 
 FFP variant、compat uniform 等专项统计只在验证具体假设时临时加入。本轮 compat uniform 专项统计已在完成
 实机验证后移除；稳定保留的 stage 计时用于后续回归比较。

@@ -1,6 +1,8 @@
 package org.embeddedt.embeddium.impl.render.chunk.compile.executor;
 
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildContext;
+import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
+import org.embeddedt.embeddium.impl.util.task.CancellationToken;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CountDownLatch;
@@ -13,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChunkJobQueueTest {
     @Test
-    void reportsBlockedWorkerAndPreservesPermitSemantics() throws Exception {
+    void blockedWorkerWakesAndReceivesAddedJob() throws Exception {
         ChunkJobQueue queue = new ChunkJobQueue();
         CountDownLatch workerStarted = new CountDownLatch(1);
         AtomicReference<ChunkJob> returnedJob = new AtomicReference<>();
@@ -32,21 +34,21 @@ class ChunkJobQueueTest {
             worker.start();
             assertTrue(workerStarted.await(1, TimeUnit.SECONDS));
 
+            // Semaphore.acquire parks the worker; wait until it is actually blocked before adding work.
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            boolean workerBlocked = false;
+            boolean workerWaiting = false;
             while (System.nanoTime() < deadline) {
-                if (queue.checkAndClearWorkerBlocked()) {
-                    workerBlocked = true;
+                if (worker.getState() == Thread.State.WAITING) {
+                    workerWaiting = true;
                     break;
                 }
                 Thread.yield();
             }
 
-            assertTrue(workerBlocked);
-            assertFalse(queue.checkAndClearWorkerBlocked());
+            assertTrue(workerWaiting, "The worker did not block on the empty queue before the deadline");
 
-            TestJob job = new TestJob();
-            queue.add(job, false);
+            var job = newJob();
+            queue.add(job, 0L);
 
             worker.join(1_000);
             assertFalse(worker.isAlive());
@@ -58,28 +60,37 @@ class ChunkJobQueueTest {
         }
     }
 
-    private static final class TestJob implements ChunkJob {
-        private volatile boolean cancelled;
-        private volatile boolean started;
+    @Test
+    void pollsJobsInPriorityOrder() {
+        ChunkJobQueue queue = new ChunkJobQueue();
 
-        @Override
-        public void execute(ChunkBuildContext context) {
-            this.started = true;
+        try {
+            var far = newJob();
+            var near = newJob();
+            var important = newJob();
+
+            queue.add(far, 100L);
+            queue.add(near, 5L);
+            queue.add(important, ChunkJobQueue.IMPORTANT_PRIORITY);
+
+            assertSame(important, queue.pollJob());
+            assertSame(near, queue.pollJob());
+            assertSame(far, queue.pollJob());
+            assertTrue(queue.isEmpty());
+        } finally {
+            queue.shutdown();
         }
+    }
 
-        @Override
-        public boolean isStarted() {
-            return this.started;
-        }
+    private static ChunkJobTyped<ChunkBuilderTask<Object>, Object> newJob() {
+        return new ChunkJobTyped<>(new StubTask(), result -> {
+        });
+    }
 
+    private static final class StubTask extends ChunkBuilderTask<Object> {
         @Override
-        public boolean isCancelled() {
-            return this.cancelled;
-        }
-
-        @Override
-        public void setCancelled() {
-            this.cancelled = true;
+        public Object execute(ChunkBuildContext context, CancellationToken cancellationToken) {
+            return null;
         }
     }
 }

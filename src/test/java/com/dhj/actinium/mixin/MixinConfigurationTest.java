@@ -58,6 +58,7 @@ class MixinConfigurationTest {
         "mixins.actinium.hbm.json",
         "mixins.actinium.kirino.json",
         "mixins.actinium.scannable.json",
+        "mixins.actinium.littletiles.json",
         "mixins.actinium.obscuretooltips.json"
     );
     private static final List<String> CONFIGS = Stream.concat(

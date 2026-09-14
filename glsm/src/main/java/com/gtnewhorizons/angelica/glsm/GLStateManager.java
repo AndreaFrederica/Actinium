@@ -70,6 +70,7 @@ import org.joml.Vector4f;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.LWJGLException;
 
+import org.lwjgl.opengl.ARBImaging;
 import org.lwjgl.opengl.ARBShaderObjects;
 import org.lwjgl.opengl.ContextCapabilities;
 import org.lwjgl.opengl.Display;
@@ -147,6 +148,7 @@ public class GLStateManager {
     public static final int MAX_MODELVIEW_STACK_DEPTH = 32 + 2;
     public static final int MAX_PROJECTION_STACK_DEPTH = 4;
     public static final int MAX_TEXTURE_STACK_DEPTH = 4;
+    public static final int MAX_COLOR_STACK_DEPTH = 4;
     public static final int MAX_CLIP_PLANES = 8;
     public static final int MAX_TEXTURE_UNITS = RENDER_BACKEND.getInteger(GL20.GL_MAX_TEXTURE_IMAGE_UNITS);
 
@@ -157,6 +159,7 @@ public class GLStateManager {
     public static int mvGeneration;    // modelview matrix changes
     public static int projGeneration;  // projection matrix changes
     public static int texMatrixGeneration; // texture matrix changes
+    public static int colorMatrixGeneration; // color matrix changes
     public static int lightingGeneration;
     public static int fragmentGeneration; // fog + alpha ref
     public static int colorGeneration;    // current vertex color
@@ -279,6 +282,7 @@ public class GLStateManager {
     private static final int[] savedMvGen = new int[MAX_ATTRIB_STACK_DEPTH];
     private static final int[] savedProjGen = new int[MAX_ATTRIB_STACK_DEPTH];
     private static final int[] savedTexMatGen = new int[MAX_ATTRIB_STACK_DEPTH];
+    private static final int[] savedColorMatGen = new int[MAX_ATTRIB_STACK_DEPTH];
     private static final int[] savedLightingGen = new int[MAX_ATTRIB_STACK_DEPTH];
     private static final int[] savedFragmentGen = new int[MAX_ATTRIB_STACK_DEPTH];
     private static final int[] savedColorGen = new int[MAX_ATTRIB_STACK_DEPTH];
@@ -393,6 +397,7 @@ public class GLStateManager {
     @Getter protected static final MatrixModeStack matrixMode = new MatrixModeStack();
     @Getter protected static final Matrix4fStack modelViewMatrix = new Matrix4fStack(MAX_MODELVIEW_STACK_DEPTH);
     @Getter protected static final Matrix4fStack projectionMatrix = new Matrix4fStack(MAX_PROJECTION_STACK_DEPTH);
+    @Getter protected static final Matrix4fStack colorMatrix = new Matrix4fStack(MAX_COLOR_STACK_DEPTH);
 
     @Getter protected static final BooleanStateStack[] lightStates = new BooleanStateStack[8];
     @Getter protected static final LightStateStack[] lightDataStates = new LightStateStack[8];
@@ -1088,6 +1093,8 @@ public class GLStateManager {
             case GL11.GL_COLOR_MATERIAL_PARAMETER -> colorMaterialParameter.getValue();
             case GL11.GL_MODELVIEW_STACK_DEPTH -> getMatrixStackDepth(modelViewMatrix);
             case GL11.GL_PROJECTION_STACK_DEPTH -> getMatrixStackDepth(projectionMatrix);
+            case ARBImaging.GL_COLOR_MATRIX_STACK_DEPTH -> getMatrixStackDepth(colorMatrix);
+            case ARBImaging.GL_MAX_COLOR_MATRIX_STACK_DEPTH -> MAX_COLOR_STACK_DEPTH;
             case GL11.GL_CULL_FACE_MODE -> polygonState.getCullFaceMode();
             case GL11.GL_FRONT_FACE -> polygonState.getFrontFace();
 
@@ -1206,6 +1213,7 @@ public class GLStateManager {
             case GL11.GL_MODELVIEW_MATRIX -> modelViewMatrix.get(0, params);
             case GL11.GL_PROJECTION_MATRIX -> projectionMatrix.get(0, params);
             case GL11.GL_TEXTURE_MATRIX -> textures.getTextureUnitMatrix(getActiveTextureUnit()).get(0, params);
+            case ARBImaging.GL_COLOR_MATRIX -> colorMatrix.get(0, params);
             case GL11.GL_COLOR_CLEAR_VALUE -> clearColor.get(params);
             case GL11.GL_CURRENT_COLOR -> color.get(params);
             case GL11.GL_DEPTH_RANGE -> {
@@ -3553,6 +3561,7 @@ public class GLStateManager {
         savedMvGen[attribDepth] = mvGeneration;
         savedProjGen[attribDepth] = projGeneration;
         savedTexMatGen[attribDepth] = texMatrixGeneration;
+        savedColorMatGen[attribDepth] = colorMatrixGeneration;
         savedLightingGen[attribDepth] = lightingGeneration;
         savedFragmentGen[attribDepth] = fragmentGeneration;
         savedColorGen[attribDepth] = colorGeneration;
@@ -3714,6 +3723,7 @@ public class GLStateManager {
             if (mvGeneration != savedMvGen[depth]) mvGeneration++;
             if (projGeneration != savedProjGen[depth]) projGeneration++;
             if (texMatrixGeneration != savedTexMatGen[depth]) texMatrixGeneration++;
+            if (colorMatrixGeneration != savedColorMatGen[depth]) colorMatrixGeneration++;
         }
         if ((mask & GL11.GL_CURRENT_BIT) != 0) {
             if (colorGeneration != savedColorGen[depth]) colorGeneration++;
@@ -3832,7 +3842,13 @@ public class GLStateManager {
             case GL11.GL_TEXTURE -> {
                 return textures.getTextureUnitMatrix(getActiveTextureUnit());
             }
-            default -> throw new IllegalStateException("Unknown matrix mode: " + matrixMode.getMode());
+            case GL11.GL_COLOR -> {
+                return colorMatrix;
+            }
+            default -> {
+                LOGGER.warn("Unknown matrix mode {}, falling back to modelViewMatrix", matrixMode.getMode());
+                return modelViewMatrix;
+            }
         }
     }
 
@@ -3842,6 +3858,11 @@ public class GLStateManager {
             case GL11.GL_MODELVIEW -> mvGeneration++;
             case GL11.GL_PROJECTION -> projGeneration++;
             case GL11.GL_TEXTURE -> texMatrixGeneration++;
+            case GL11.GL_COLOR -> colorMatrixGeneration++;
+            default -> {
+                LOGGER.warn("Unknown matrix mode {}, falling back to mvGeneration", matrixMode.getMode());
+                mvGeneration++;
+            }
         }
     }
 
@@ -6413,6 +6434,42 @@ public class GLStateManager {
 
     public static void glUniform4(int location, IntBuffer values) {
         RENDER_BACKEND.uniform4iv(location, values);
+    }
+
+    // ARB_shader_objects buffer forms: the GL redirector rewrites ARBShaderObjects
+    // glUniform{1..4}ARB calls to these same-named methods while preserving the caller's
+    // descriptor, so every FloatBuffer/IntBuffer overload must exist here or the call
+    // fails with NoSuchMethodError (Dynamic Surroundings aurora shader, issue #137).
+    public static void glUniform1ARB(int location, FloatBuffer values) {
+        glUniform1(location, values);
+    }
+
+    public static void glUniform1ARB(int location, IntBuffer values) {
+        glUniform1(location, values);
+    }
+
+    public static void glUniform2ARB(int location, FloatBuffer values) {
+        glUniform2(location, values);
+    }
+
+    public static void glUniform2ARB(int location, IntBuffer values) {
+        glUniform2(location, values);
+    }
+
+    public static void glUniform3ARB(int location, FloatBuffer values) {
+        glUniform3(location, values);
+    }
+
+    public static void glUniform3ARB(int location, IntBuffer values) {
+        glUniform3(location, values);
+    }
+
+    public static void glUniform4ARB(int location, FloatBuffer values) {
+        glUniform4(location, values);
+    }
+
+    public static void glUniform4ARB(int location, IntBuffer values) {
+        glUniform4(location, values);
     }
 
     public static void glUniformMatrix2(int location, boolean transpose, FloatBuffer matrices) {
