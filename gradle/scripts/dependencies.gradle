@@ -182,4 +182,9 @@ dependencies {
     // FluxLoading 1.4.1 (issue #102: re-entering a world leaves its loading screen image stuck
     // instead of fading out; dev-verifies the loading screen overlay compat)
     modImplementation 'curse.maven:fluxloading-1207328:7601634'
+
+    // Obscure Tooltips 3.10.2 (PR #142: its ArmorPreviewComponent renders an armor-stand entity
+    // inside the GUI tooltip pass; the Iris armor item ID/glint hooks must skip that pass —
+    // dev-verifies mixins.actinium.obscuretooltips.json)
+    modImplementation 'curse.maven:obscure-tooltips-715660:8522661'
 }

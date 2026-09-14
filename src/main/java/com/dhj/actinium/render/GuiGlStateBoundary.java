@@ -10,28 +10,35 @@ import org.lwjgl.opengl.GL20;
 import java.nio.ByteBuffer;
 
 /**
- * Defines the fixed-function state owned by GUI render boundaries.
+ * Defines the fixed-function state owned by GUI render boundaries and tracks whether entity
+ * rendering is running inside a GUI surface.
  */
 public final class GuiGlStateBoundary {
-    private static final ThreadLocal<Integer> ENTITY_GUI_DEPTH = ThreadLocal.withInitial(() -> 0);
+    private static int entityGuiSurfaceDepth;
+
     private GuiGlStateBoundary() {
     }
 
-    /** Isolates legacy entity rendering performed inside a GUI tooltip. */
+    /**
+     * Marks the start of entity rendering performed inside a GUI surface, such as a tooltip
+     * armor preview. While the surface is active, Iris hooks that apply world-render state
+     * (armor item ids, enchant glint conditions) must leave the pass untouched. Every begin
+     * must be balanced by {@link EntitySurfaceState#restore()} on the returned token, even
+     * when the nested render throws.
+     *
+     * <p>Minecraft renders on a single thread, so a plain counter is sufficient.
+     */
     public static EntitySurfaceState beginEntitySurface() {
-        ENTITY_GUI_DEPTH.set(ENTITY_GUI_DEPTH.get() + 1);
+        entityGuiSurfaceDepth++;
         return new EntitySurfaceState();
     }
 
-    public static final class EntitySurfaceState {
-        private EntitySurfaceState() { }
-        public void restore() {
-            int depth = ENTITY_GUI_DEPTH.get() - 1;
-            if (depth <= 0) ENTITY_GUI_DEPTH.remove(); else ENTITY_GUI_DEPTH.set(depth);
-        }
+    /**
+     * Returns whether the current pass is entity rendering nested inside a GUI surface.
+     */
+    public static boolean isEntityGuiSurface() {
+        return entityGuiSurfaceDepth > 0;
     }
-
-    public static boolean isEntityGuiSurface() { return ENTITY_GUI_DEPTH.get() > 0; }
 
     /**
      * Restores the neutral state expected when Minecraft starts rendering the HUD.
@@ -171,6 +178,29 @@ public final class GuiGlStateBoundary {
             } else {
                 GLStateManager.glDisable(capability);
             }
+        }
+    }
+
+    /**
+     * Balance token for {@link #beginEntitySurface()}; ends the surface exactly once.
+     */
+    public static final class EntitySurfaceState {
+        private boolean spent;
+
+        private EntitySurfaceState() {
+        }
+
+        /**
+         * Marks the end of the GUI entity surface this token was created for.
+         *
+         * @throws IllegalStateException when this token has already been restored
+         */
+        public void restore() {
+            if (spent) {
+                throw new IllegalStateException("entity GUI surface restored twice");
+            }
+            spent = true;
+            entityGuiSurfaceDepth--;
         }
     }
 }
