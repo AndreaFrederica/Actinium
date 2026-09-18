@@ -3,7 +3,6 @@ package com.dhj.actinium.mixin.vintage.core.terrain;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import com.dhj.actinium.compat.dh.DistantHorizonsCompat;
 import com.dhj.actinium.compat.ichunutil.PortalViewportProvider;
 import net.coderbot.iris.compat.rfp2.Rfp2Compat;
 import com.gtnewhorizons.angelica.glsm.shadow.InternalShadowRenderingState;
@@ -25,13 +24,13 @@ import net.minecraft.client.renderer.culling.ICamera;
 import net.minecraft.client.renderer.entity.RenderManager;
 import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.settings.GameSettings;
+import net.minecraftforge.client.MinecraftForgeClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.BlockRenderLayer;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
-import com.gtnewhorizon.gtnhlib.compat.Mods;
 import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
 import org.embeddedt.embeddium.impl.render.terrain.SimpleWorldRenderer;
 import org.embeddedt.embeddium.impl.render.viewport.ViewportProvider;
@@ -66,6 +65,15 @@ public abstract class MixinRenderGlobal implements SimpleWorldRenderer.Provider<
 
     @Shadow
     protected abstract boolean isOutlineActive(Entity entityIn, Entity viewer, ICamera camera);
+
+    /**
+     * Vanilla's single-argument overload. It is deliberately left unmodified and invoked from the
+     * overwritten entry point below, so injections anchored inside it stay reachable.
+     */
+    @Shadow
+    private void renderBlockLayer(BlockRenderLayer blockLayerIn) {
+        throw new AssertionError();
+    }
 
     @Shadow
     private WorldClient world;
@@ -125,14 +133,15 @@ public abstract class MixinRenderGlobal implements SimpleWorldRenderer.Provider<
     }
 
     /**
-     * @reason Redirect the chunk layer render passes to our renderer
+     * @reason Redirect the chunk layer render passes to our renderer. The four-argument entry point is
+     * overwritten, while the single-argument overload it normally calls is left vanilla and invoked
+     * below, so injections anchored inside that overload keep firing. Overwriting the overload itself
+     * would break them: Mixin refuses instruction-level injection points in a method that a
+     * higher-priority mixin has already merged.
      * @author JellySquid
      */
     @Overwrite
     public int renderBlockLayer(BlockRenderLayer blockLayerIn, double partialTicks, int pass, Entity entityIn) {
-        boolean renderDistantHorizonsLods = Mods.DISTANTHORIZONS
-                && !ShadowRenderingState.areShadowsCurrentlyBeingRendered();
-
         WorldRenderingPipeline pipeline = null;
         if (Iris.enabled) {
             pipeline = Iris.getPipelineManager().getPipelineNullable();
@@ -147,9 +156,6 @@ public abstract class MixinRenderGlobal implements SimpleWorldRenderer.Provider<
                     if (!ShadowRenderingState.areShadowsCurrentlyBeingRendered()
                             && IrisApiV0Impl.INSTANCE.isShaderPackInUse()) {
                         this.actinium$beginIrisTranslucents(pipeline, (float) partialTicks);
-                        if (renderDistantHorizonsLods) {
-                            DistantHorizonsCompat.renderDeferredLodsForShaders(this.world, partialTicks);
-                        }
                     }
                     pipeline.setPhase(WorldRenderingPhase.TERRAIN_TRANSLUCENT);
                 }
@@ -162,6 +168,13 @@ public abstract class MixinRenderGlobal implements SimpleWorldRenderer.Provider<
         GlStateManager.setActiveTexture(OpenGlHelper.defaultTexUnit);
         GlStateManager.bindTexture(this.mc.getTextureMapBlocks().getGlTextureId());
         GlStateManager.enableTexture2D();
+
+        if (blockLayerIn == BlockRenderLayer.TRANSLUCENT) {
+            // Run vanilla's overload so third-party injections anchored inside it stay reachable (its
+            // enableLightmap call is one such anchor). Its renderContainer pass draws nothing, since
+            // Celeritas owns chunk rendering and never populates that container.
+            this.renderBlockLayer(blockLayerIn);
+        }
 
         this.mc.entityRenderer.enableLightmap();
 
@@ -250,7 +263,7 @@ public abstract class MixinRenderGlobal implements SimpleWorldRenderer.Provider<
 
     @Inject(method = "renderEntities", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/RenderHelper;enableStandardItemLighting()V", shift = At.Shift.AFTER, ordinal = 1), cancellable = true)
     public void sodium$renderTileEntities(Entity entity, ICamera camera, float partialTicks, CallbackInfo ci) {
-        int pass = net.minecraftforge.client.MinecraftForgeClient.getRenderPass();
+        int pass = MinecraftForgeClient.getRenderPass();
         boolean renderShadowBlockEntities = !ShadowRenderingState.areShadowsCurrentlyBeingRendered()
                 || InternalShadowRenderingState.shouldRenderShadowBlockEntities();
 
@@ -336,7 +349,7 @@ public abstract class MixinRenderGlobal implements SimpleWorldRenderer.Provider<
     private void renderEntities(Entity renderViewEntity, ICamera camera, float partialTicks, CallbackInfo ci,
                                 @Local(ordinal = 1) List<Entity> outlineEntityList,
                                 @Local(ordinal = 2) List<Entity> multipassEntityList) {
-        int pass = net.minecraftforge.client.MinecraftForgeClient.getRenderPass();
+        int pass = MinecraftForgeClient.getRenderPass();
         double renderViewX = renderViewEntity.prevPosX + (renderViewEntity.posX - renderViewEntity.prevPosX) * partialTicks;
         double renderViewY = renderViewEntity.prevPosY + (renderViewEntity.posY - renderViewEntity.prevPosY) * partialTicks;
         double renderViewZ = renderViewEntity.prevPosZ + (renderViewEntity.posZ - renderViewEntity.prevPosZ) * partialTicks;
