@@ -1,8 +1,6 @@
 package com.dhj.actinium;
 
 import com.dhj.actinium.compat.chunkanimator.ChunkAnimatorCompat;
-import com.dhj.actinium.compat.dh.ActiniumDHIrisCompat;
-import com.dhj.actinium.compat.dh.DistantHorizonsCompat;
 import com.dhj.actinium.compat.MissingModelCompat;
 import com.dhj.actinium.compat.kirino.KirinoCompat;
 import com.dhj.actinium.compat.neofontrender.NeoFontRenderCompat;
@@ -17,6 +15,7 @@ import com.dhj.actinium.runtime.ActiniumRuntime;
 import com.dhj.actinium.render.terrain.ActiniumWorldRenderer;
 import net.coderbot.iris.celeritas.WorldRendererCompatBridge;
 import com.gtnewhorizons.angelica.proxy.ClientProxy;
+import com.gtnewhorizon.gtnhlib.compat.Mods;
 import net.coderbot.iris.debug.IrisDebugOptions;
 import com.gtnewhorizon.gtnhlib.client.renderer.RuntimeOptionsBridge;
 import com.gtnewhorizon.gtnhlib.client.renderer.postprocessing.PostProcessingBridge;
@@ -39,7 +38,6 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.Mod.EventHandler;
 import net.minecraftforge.fml.common.event.FMLConstructionEvent;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import org.embeddedt.embeddium.impl.common.util.MathUtil;
 import org.embeddedt.embeddium.impl.common.util.NativeBuffer;
@@ -164,14 +162,8 @@ public class Actinium {
     }
 
     @EventHandler
-    public void onPreInit(FMLPreInitializationEvent event) {
-        ensureDistantHorizonsBindings();
-    }
-
-    @EventHandler
     public void onInit(FMLInitializationEvent event) {
-        ensureDistantHorizonsBindings();
-        if (Loader.isModLoaded("neofontrender")) {
+        if (Mods.NEOFONTRENDER) {
             NeoFontRenderCompat.initialize();
         }
         ChunkAnimatorCompat.install();
@@ -193,16 +185,13 @@ public class Actinium {
         ActiniumDiagnostics.logInitialization(ActiniumRuntime.version());
     }
 
+    /**
+     * Distant Horizons owns its own integration (the {@code IIrisAccessor} binding and the deferred LOD
+     * toggle); Actinium only installs the shader-side DH render programs that DH then triggers itself.
+     */
     private static void initializeDistantHorizonsCompat() {
-        if (Iris.enabled && Loader.isModLoaded("distanthorizons")) {
-            ActiniumDHIrisCompat.registerAccessor();
+        if (Iris.enabled && Mods.DISTANTHORIZONS) {
             DHCompat.run();
-        }
-    }
-
-    private static void ensureDistantHorizonsBindings() {
-        if (Loader.isModLoaded("distanthorizons")) {
-            DistantHorizonsCompat.ensureClientBindings();
         }
     }
 

@@ -154,6 +154,9 @@ public class GLStateManager {
 
     public static final GLFeatureSet HAS_MULTIPLE_SET = new GLFeatureSet();
 
+    /** Widest GL state query GLSM answers into a caller-provided array (a 4x4 matrix). */
+    private static final int ARRAY_QUERY_SCRATCH_SIZE = 16;
+
     // Generation counters for FFP uniform dirty tracking. Bumped when the corresponding GLSM state changes.
     // Per-matrix-mode generation counters — avoids re-uploading all matrices when only one mode changed
     public static int mvGeneration;    // modelview matrix changes
@@ -211,6 +214,10 @@ public class GLStateManager {
     @Getter @Setter private static Thread drawableGLHolder = MainThread;
     // Reference to DrawableGL (main display context) - works with both FML and BLS splash
     @Setter private static Drawable drawableGL = null;
+    // Context handle captured when the default VAO is created during init. Splash replacements
+    // can migrate the game to a different GL context at finish (issue #150); compared against
+    // the current handle to detect the migration. 0 when the backend has no queryable handle.
+    private static long displayContextHandle;
 
     public static boolean isCachingEnabled() {
         if (splashComplete) return true;
@@ -661,6 +668,7 @@ public class GLStateManager {
         }
 
         defaultVAO = RENDER_BACKEND.genVertexArrays();
+        displayContextHandle = RENDER_BACKEND.getContextHandle();
         RENDER_BACKEND.bindVertexArray(defaultVAO);
         boundVAO = defaultVAO;
         VertexAttribState.init(defaultVAO);
@@ -1163,6 +1171,18 @@ public class GLStateManager {
         }
     }
 
+    /**
+     * Array flavour of {@link #glGetInteger(int, IntBuffer)}. Callers whose GL queries GLSM redirects
+     * pass arrays, so this overload has to exist. The scratch buffer is sized for the widest query GLSM
+     * answers so the backend can never overflow a shorter caller array.
+     */
+    public static void glGetInteger(int pname, int[] params) {
+        final IntBuffer buffer = IntBuffer.allocate(Math.max(params.length, ARRAY_QUERY_SCRATCH_SIZE));
+        glGetInteger(pname, buffer);
+        buffer.position(0);
+        buffer.get(params);
+    }
+
     public static void glGetMaterial(int face, int pname, FloatBuffer params) {
         final MaterialStateStack state;
         if (face == GL11.GL_FRONT) {
@@ -1260,6 +1280,18 @@ public class GLStateManager {
                 }
             }
         }
+    }
+
+    /**
+     * Array flavour of {@link #glGetFloat(int, FloatBuffer)}. Callers whose GL queries GLSM redirects
+     * pass arrays, so this overload has to exist. The scratch buffer is sized for the widest query GLSM
+     * answers (a 4x4 matrix) so the backend can never overflow a shorter caller array.
+     */
+    public static void glGetFloat(int pname, float[] params) {
+        final FloatBuffer buffer = FloatBuffer.allocate(Math.max(params.length, ARRAY_QUERY_SCRATCH_SIZE));
+        glGetFloat(pname, buffer);
+        buffer.position(0);
+        buffer.get(params);
     }
 
     public static float glGetFloat(int pname) {
@@ -3478,6 +3510,26 @@ public class GLStateManager {
     }
 
     /**
+     * Whether the current GL context differs from the one the default VAO was created on during
+     * init (issue #150). Splash replacements can migrate the game to their own context at finish;
+     * container objects (VAOs) from the startup context are invalid afterwards, while VBOs are
+     * shared and stay valid.
+     */
+    public static boolean displayContextMigrated() {
+        return displayContextHandle != 0 && RENDER_BACKEND.getContextHandle() != displayContextHandle;
+    }
+
+    /**
+     * Recreate the default VAO on the current context and force the binding bookkeeping back in
+     * sync. Only meaningful after {@link #displayContextMigrated()} reported a migration.
+     */
+    public static void recreateDefaultVertexArray() {
+        defaultVAO = glGenVertexArrays();
+        boundVAO = -1;
+        glBindVertexArray(0);
+    }
+
+    /**
      * Mark splash as complete - enables fast path that always caches. Called when finish() permanently switches to DrawableGL for the main game loop.
      */
     public static void markSplashComplete() {
@@ -5553,7 +5605,15 @@ public class GLStateManager {
     }
 
     public static int glGenVertexArrays() {
-        return RENDER_BACKEND.genVertexArrays();
+        final int array = RENDER_BACKEND.genVertexArrays();
+        // The driver recycles ids of deleted VAOs, and the splash screen's separate GL context
+        // hands out the same numeric ids as the main context. Forget whatever this id meant
+        // before: any cached state for it describes a dead object and must not leak into the
+        // new VAO (issue #150).
+        ShaderManager.getInstance().onDeleteVertexArray(array);
+        VertexAttribState.onDeleteVertexArray(array);
+        vaoEboMap.remove(array);
+        return array;
     }
 
     public static boolean glIsVertexArray(int array) {
